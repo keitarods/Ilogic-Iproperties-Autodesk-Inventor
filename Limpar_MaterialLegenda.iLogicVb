@@ -1,0 +1,20 @@
+﻿' ==========================================================
+' Regra iLogic: Limpar_MaterialLegenda
+'
+' Objetivo:
+' - Limpar o campo MaterialLegenda das iProperties customizadas
+' - Permitir que a regra principal pergunte novamente o material
+' ==========================================================
+
+Try
+    iProperties.Value("Custom", "MaterialLegenda") = ""
+Catch
+    MessageBox.Show("A propriedade customizada 'MaterialLegenda' não foi encontrada.", "Aviso iLogic")
+    Return
+End Try
+
+InventorVb.DocumentUpdate()
+
+MessageBox.Show("Campo MaterialLegenda limpo com sucesso." & vbCrLf & _
+                "Na próxima execução da regra principal, a lista de materiais será exibida novamente.", _
+                "Material limpo")

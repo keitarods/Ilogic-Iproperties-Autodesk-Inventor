@@ -1,0 +1,15 @@
+﻿Sub Main()
+
+    Try
+        iProperties.Value("Custom", "Código") = ""
+    Catch
+    End Try
+
+    Try
+        iProperties.Value("Custom", "Codigo") = ""
+    Catch
+    End Try
+
+    MessageBox.Show("Campo Código limpo com sucesso.", "iLogic")
+
+End Sub
