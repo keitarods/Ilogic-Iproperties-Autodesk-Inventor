@@ -38,6 +38,7 @@ Dim gAcabamentoLista As String
 Dim gTratamento As String
 Dim gDureza As String
 Dim gProcessos As String
+Dim gSetor As String
 Dim gCodigo As String
 
 ' 2 - TipoItem
@@ -86,6 +87,13 @@ If Trim(gProcessos) = "" Then
 End If
 
 ' 8 - Código
+gSetor = PerguntarSetorChecklist()
+
+If Trim(gSetor) = "" Then
+    gSetor = "N/A"
+End If
+
+' 8 - Código
 gCodigo = PerguntarCodigo()
 
 If Trim(gCodigo) = "" Then
@@ -94,7 +102,7 @@ If Trim(gCodigo) = "" Then
 End If
 
 ' Salva as variáveis comuns antes da análise geométrica.
-SalvarVariaveisComuns(gTipoItem, gMaterialLegenda, gAcabamentoLista, gTratamento, gDureza, gProcessos, gCodigo)
+SalvarVariaveisComuns(gTipoItem, gMaterialLegenda, gAcabamentoLista, gTratamento, gDureza, gProcessos, gSetor, gCodigo)
 
 ' 9 - Aplica regra conforme TipoItem.
 If gTipoItem = "Chapa" Then
@@ -232,6 +240,7 @@ Public Sub SalvarVariaveisComuns(ByVal tipoItem As String, _
                                   ByVal tratamento As String, _
                                   ByVal dureza As String, _
                                   ByVal processos As String, _
+                                  ByVal setor As String, _
                                   ByVal codigo As String)
 
     iProperties.Value("Custom", "TipoItem") = tipoItem
@@ -240,6 +249,7 @@ Public Sub SalvarVariaveisComuns(ByVal tipoItem As String, _
     iProperties.Value("Custom", "Tratamento") = tratamento
     iProperties.Value("Custom", "Dureza") = dureza
     iProperties.Value("Custom", "Processos") = processos
+    iProperties.Value("Custom", "Setor") = setor
     iProperties.Value("Custom", "Código") = codigo
 
 End Sub
@@ -517,6 +527,7 @@ Public Sub Atualizar_Chapa(ByVal oDoc As PartDocument)
     iProperties.Value("Custom", "Tratamento") = tratamentoTxt
     iProperties.Value("Custom", "Dureza") = durezaTxt
     iProperties.Value("Custom", "Processos") = LerIPropertyCustom("Processos", "N/A")
+    iProperties.Value("Custom", "Setor") = LerIPropertyCustom("Setor", "N/A")
     iProperties.Value("Custom", "Código") = LerIPropertyCustom("Código", "")
 
     iProperties.Value("Project", "Description") = descricaoTxt
@@ -723,6 +734,7 @@ Public Sub Atualizar_Tubo_Redondo(ByVal oDoc As PartDocument)
     iProperties.Value("Custom", "Tratamento") = tratamentoTxt
     iProperties.Value("Custom", "Dureza") = durezaTxt
     iProperties.Value("Custom", "Processos") = processosTxt
+    iProperties.Value("Custom", "Setor") = LerIPropertyCustom("Setor", "N/A")
     iProperties.Value("Project", "Description") = descricaoTxt
 
     InventorVb.DocumentUpdate()
@@ -962,6 +974,7 @@ Public Sub Atualizar_Tubo_Quadrado(ByVal oDoc As PartDocument)
     iProperties.Value("Custom", "Tratamento") = tratamentoTxt
     iProperties.Value("Custom", "Dureza") = durezaTxt
     iProperties.Value("Custom", "Processos") = LerIPropertyCustom("Processos", "N/A")
+    iProperties.Value("Custom", "Setor") = LerIPropertyCustom("Setor", "N/A")
     iProperties.Value("Custom", "Código") = LerIPropertyCustom("Código", "")
 
     iProperties.Value("Project", "Description") = descricaoTxt
@@ -1161,6 +1174,7 @@ Public Sub Atualizar_Eixo(ByVal oDoc As PartDocument)
     iProperties.Value("Custom", "Tratamento") = tratamentoTxt
     iProperties.Value("Custom", "Dureza") = durezaTxt
     iProperties.Value("Custom", "Processos") = LerIPropertyCustom("Processos", "N/A")
+    iProperties.Value("Custom", "Setor") = LerIPropertyCustom("Setor", "N/A")
     iProperties.Value("Custom", "Código") = LerIPropertyCustom("Código", "")
 
     iProperties.Value("Project", "Description") = descricaoTxt
@@ -2151,6 +2165,178 @@ Public Function PerguntarTratamentoChecklist() As String
     iProperties.Value("Custom", "Tratamento") = tratamentoFinal
 
     Return tratamentoFinal
+
+End Function
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: SETOR COM CHECKLIST SEMPRE PERGUNTANDO
+' ==========================================================
+
+Public Function PerguntarSetorChecklist() As String
+
+    Dim setorAtual As String
+    setorAtual = ""
+
+    Try
+        setorAtual = iProperties.Value("Custom", "Setor")
+    Catch
+        iProperties.Value("Custom", "Setor") = ""
+        setorAtual = ""
+    End Try
+
+    Dim pastaListas As String
+    pastaListas = ObterPastaListas()
+
+    Dim arquivoSetores As String
+    arquivoSetores = pastaListas & "\setores.txt"
+
+    If Not System.IO.File.Exists(arquivoSetores) Then
+        Dim setoresIniciais As String
+        setoresIniciais = "Mecânica" & vbCrLf & _
+                          "Elétrica/Eletrônica" & vbCrLf & _
+                          "Hidraúlica" & vbCrLf & _
+                          "IA"
+
+        System.IO.File.WriteAllText(arquivoSetores, setoresIniciais)
+    End If
+
+    Dim listaSetores As New ArrayList
+    Dim linhasSetores() As String
+    linhasSetores = System.IO.File.ReadAllLines(arquivoSetores)
+
+    For Each linha As String In linhasSetores
+        If Trim(linha) <> "" Then
+            If Not listaSetores.Contains(Trim(linha)) Then
+                listaSetores.Add(Trim(linha))
+            End If
+        End If
+    Next
+
+    Dim frmSetor As New System.Windows.Forms.Form()
+    frmSetor.Text = "Setor da peça"
+    frmSetor.Width = 460
+    frmSetor.Height = 420
+    frmSetor.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+    frmSetor.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+    frmSetor.MaximizeBox = False
+    frmSetor.MinimizeBox = False
+
+    Dim lblSetorInfo As New System.Windows.Forms.Label()
+    lblSetorInfo.Text = "Selecione um ou mais setores:"
+    lblSetorInfo.Left = 20
+    lblSetorInfo.Top = 20
+    lblSetorInfo.Width = 400
+    lblSetorInfo.Height = 20
+
+    Dim chkSetores As New System.Windows.Forms.CheckedListBox()
+    chkSetores.Left = 20
+    chkSetores.Top = 45
+    chkSetores.Width = 400
+    chkSetores.Height = 150
+    chkSetores.CheckOnClick = True
+
+    For Each item As String In listaSetores
+        chkSetores.Items.Add(item)
+    Next
+
+    If Trim(setorAtual) <> "" Then
+        For i As Integer = 0 To chkSetores.Items.Count - 1
+            If setorAtual.Contains(chkSetores.Items(i).ToString()) Then
+                chkSetores.SetItemChecked(i, True)
+            End If
+        Next
+    End If
+
+    Dim lblNovoSetor As New System.Windows.Forms.Label()
+    lblNovoSetor.Text = "Ou digite um novo setor:"
+    lblNovoSetor.Left = 20
+    lblNovoSetor.Top = 210
+    lblNovoSetor.Width = 400
+    lblNovoSetor.Height = 20
+
+    Dim txtNovoSetor As New System.Windows.Forms.TextBox()
+    txtNovoSetor.Left = 20
+    txtNovoSetor.Top = 235
+    txtNovoSetor.Width = 400
+
+    Dim lblObsSetor As New System.Windows.Forms.Label()
+    lblObsSetor.Text = "Se preencher o campo novo, ele será salvo na lista e considerado junto com os marcados."
+    lblObsSetor.Left = 20
+    lblObsSetor.Top = 270
+    lblObsSetor.Width = 400
+    lblObsSetor.Height = 40
+
+    Dim btnSetorOk As New System.Windows.Forms.Button()
+    btnSetorOk.Text = "OK"
+    btnSetorOk.Left = 250
+    btnSetorOk.Top = 330
+    btnSetorOk.Width = 80
+    btnSetorOk.DialogResult = System.Windows.Forms.DialogResult.OK
+
+    Dim btnSetorCancelar As New System.Windows.Forms.Button()
+    btnSetorCancelar.Text = "Cancelar"
+    btnSetorCancelar.Left = 340
+    btnSetorCancelar.Top = 330
+    btnSetorCancelar.Width = 80
+    btnSetorCancelar.DialogResult = System.Windows.Forms.DialogResult.Cancel
+
+    frmSetor.Controls.Add(lblSetorInfo)
+    frmSetor.Controls.Add(chkSetores)
+    frmSetor.Controls.Add(lblNovoSetor)
+    frmSetor.Controls.Add(txtNovoSetor)
+    frmSetor.Controls.Add(lblObsSetor)
+    frmSetor.Controls.Add(btnSetorOk)
+    frmSetor.Controls.Add(btnSetorCancelar)
+
+    frmSetor.AcceptButton = btnSetorOk
+    frmSetor.CancelButton = btnSetorCancelar
+
+    Dim resultadoSetor As System.Windows.Forms.DialogResult
+    resultadoSetor = frmSetor.ShowDialog()
+
+    Dim setorFinal As String
+    setorFinal = "N/A"
+
+    If resultadoSetor = System.Windows.Forms.DialogResult.OK Then
+        Dim setoresSelecionados As New ArrayList
+
+        For i As Integer = 0 To chkSetores.CheckedItems.Count - 1
+            setoresSelecionados.Add(chkSetores.CheckedItems(i).ToString())
+        Next
+
+        If Trim(txtNovoSetor.Text) <> "" Then
+            Dim novoSetor As String
+            novoSetor = Trim(txtNovoSetor.Text)
+
+            If Not listaSetores.Contains(novoSetor) Then
+                System.IO.File.AppendAllText(arquivoSetores, vbCrLf & novoSetor)
+            End If
+
+            If Not setoresSelecionados.Contains(novoSetor) Then
+                setoresSelecionados.Add(novoSetor)
+            End If
+        End If
+
+        If setoresSelecionados.Count > 0 Then
+            setorFinal = ""
+            For i As Integer = 0 To setoresSelecionados.Count - 1
+                If setorFinal = "" Then
+                    setorFinal = setoresSelecionados(i).ToString()
+                Else
+                    setorFinal = setorFinal & " + " & setoresSelecionados(i).ToString()
+                End If
+            Next
+        End If
+    Else
+        setorFinal = setorAtual
+        If Trim(setorFinal) = "" Then
+            setorFinal = "N/A"
+        End If
+    End If
+
+    iProperties.Value("Custom", "Setor") = setorFinal
+
+    Return setorFinal
 
 End Function
 
