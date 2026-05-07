@@ -1,0 +1,2686 @@
+﻿AddReference "System.Windows.Forms"
+AddReference "System.Drawing"
+
+' ==========================================================
+' VARIÁVEIS GLOBAIS COLETADAS NO INÍCIO DA REGRA
+' ==========================================================
+
+
+Sub Main()
+
+' ==========================================================
+' Regra iLogic: Iproperties_geral
+'
+' Fluxo ajustado para teste:
+' 1 - Inicia o arquivo
+' 2 - Pergunta TipoItem (Chapa, Tubo Quadrado/Retangular, Tubo Redondo, Eixo)
+' 3 - Pergunta Material
+' 4 - Pergunta Acabamento
+' 5 - Pergunta Tratamento
+' 6 - Pergunta Dureza
+' 7 - Pergunta Processos em checklist
+' 8 - Pergunta Código da peça
+' 9 - Se for Chapa, converte/planifica; se não, pula
+' 10 - Salva variáveis nas iProperties
+' ==========================================================
+
+Dim oDoc As PartDocument
+oDoc = ThisDoc.Document
+
+If oDoc.DocumentType <> DocumentTypeEnum.kPartDocumentObject Then
+    MessageBox.Show("Esta regra deve ser executada em um arquivo .ipt.", "Erro iLogic")
+    Return
+End If
+
+Dim gTipoItem As String
+Dim gMaterialLegenda As String
+Dim gAcabamentoLista As String
+Dim gTratamento As String
+Dim gDureza As String
+Dim gProcessos As String
+Dim gCodigo As String
+
+' 2 - TipoItem
+gTipoItem = PerguntarTipoItem()
+
+If Trim(gTipoItem) = "" Then
+    MessageBox.Show("Nenhum TipoItem foi selecionado. A regra será encerrada.", "iLogic")
+    Return
+End If
+
+' 3 - Material
+gMaterialLegenda = PerguntarMaterialPorTipo(gTipoItem)
+
+If Trim(gMaterialLegenda) = "" Then
+    MessageBox.Show("Nenhum material foi informado. A regra será encerrada.", "iLogic")
+    Return
+End If
+
+' 4 - Acabamento
+gAcabamentoLista = PerguntarAcabamento()
+
+If Trim(gAcabamentoLista) = "" Then
+    MessageBox.Show("Nenhum acabamento foi informado. A regra será encerrada.", "iLogic")
+    Return
+End If
+
+' 5 - Tratamento
+gTratamento = PerguntarTratamentoChecklist()
+
+If Trim(gTratamento) = "" Then
+    gTratamento = "N/A"
+End If
+
+' 6 - Dureza
+gDureza = PerguntarDureza()
+
+If Trim(gDureza) = "" Then
+    gDureza = "N/A"
+End If
+
+' 7 - Processos
+gProcessos = PerguntarProcessosChecklist()
+
+If Trim(gProcessos) = "" Then
+    gProcessos = "N/A"
+End If
+
+' 8 - Código
+gCodigo = PerguntarCodigo()
+
+If Trim(gCodigo) = "" Then
+    MessageBox.Show("Nenhum Código foi informado. A regra será encerrada.", "iLogic")
+    Return
+End If
+
+' Salva as variáveis comuns antes da análise geométrica.
+SalvarVariaveisComuns(gTipoItem, gMaterialLegenda, gAcabamentoLista, gTratamento, gDureza, gProcessos, gCodigo)
+
+' 9 - Aplica regra conforme TipoItem.
+If gTipoItem = "Chapa" Then
+
+    Atualizar_Chapa(oDoc)
+
+ElseIf gTipoItem = "Tubo Quadrado/Retangular" Or gTipoItem = "Tubo Quadrado" Or gTipoItem = "Metalon" Then
+
+    ' Não converte para Sheet Metal e não tenta planificar.
+    ' Trata a geometria como peça normal.
+    Atualizar_Tubo_Quadrado(oDoc)
+
+ElseIf gTipoItem = "Tubo Redondo" Then
+
+    ' Não converte para Sheet Metal e não tenta planificar.
+    ' Trata a geometria como peça normal.
+    Atualizar_Tubo_Redondo(oDoc)
+
+ElseIf gTipoItem = "Eixo" Then
+
+    ' Não converte para Sheet Metal e não tenta planificar.
+    ' Trata a geometria como peça normal.
+    Atualizar_Eixo(oDoc)
+
+Else
+
+    MessageBox.Show("TipoItem não reconhecido: " & gTipoItem & vbCrLf & _
+                    "Execute a regra novamente e selecione um tipo válido.", _
+                    "Erro iLogic")
+    Return
+
+End If
+
+InventorVb.DocumentUpdate()
+
+End Sub
+
+' ==========================================================
+' FUNÇÃO: GARANTIR SHEET METAL SOMENTE PARA CHAPA
+'
+' Esta função só é chamada quando TipoItem = "Chapa".
+' Se a peça ainda for uma peça normal, converte o documento para Sheet Metal.
+' Depois disso, a função Atualizar_Chapa() cria/atualiza a planificação.
+' ==========================================================
+
+Public Function GarantirSheetMetalParaChapa(ByVal oDoc As PartDocument) As SheetMetalComponentDefinition
+
+    Dim oSMDef As SheetMetalComponentDefinition
+
+    Try
+        oSMDef = oDoc.ComponentDefinition
+        Return oSMDef
+    Catch
+        ' Ainda não é Sheet Metal. Vai tentar converter abaixo.
+    End Try
+
+    Try
+        ' GUID padrão de documento Sheet Metal do Inventor.
+        oDoc.SubType = "{9C464203-9BAE-11D3-8BAD-0060B0CE6BB4}"
+        InventorVb.DocumentUpdate()
+
+        oSMDef = oDoc.ComponentDefinition
+        Return oSMDef
+    Catch ex As Exception
+        MessageBox.Show("Não foi possível converter esta peça para Sheet Metal." & vbCrLf & _
+                        "A conversão só é feita quando o TipoItem é Chapa." & vbCrLf & vbCrLf & _
+                        "Detalhe: " & ex.Message, _
+                        "Erro ao converter para Sheet Metal")
+        Return Nothing
+    End Try
+
+End Function
+
+
+' ==========================================================
+' FUNÇÃO: GARANTIR PEÇA NORMAL PARA ITENS QUE NÃO SÃO CHAPA
+'
+' Esta função é chamada para Tubo Quadrado, Tubo Redondo e Eixo.
+' Assim, a regra não força esses tipos a trabalharem como Sheet Metal.
+' ==========================================================
+
+Public Sub GarantirPecaNormal(ByVal oDoc As PartDocument)
+
+    Try
+        ' GUID padrão de documento Part normal do Inventor.
+        oDoc.SubType = "{4D29B490-49B2-11D0-93C3-7E0706000000}"
+        InventorVb.DocumentUpdate()
+    Catch
+        ' Se não conseguir alterar o subtipo, segue tratando a geometria como peça normal.
+        ' As rotinas de Tubo Quadrado, Tubo Redondo e Eixo não usam planificação.
+    End Try
+
+End Sub
+
+
+
+' ==========================================================
+' FUNÇÃO: PERGUNTAR CÓDIGO
+' ==========================================================
+
+Public Function PerguntarCodigo() As String
+
+    Dim codigoAtual As String
+    codigoAtual = ""
+
+    Try
+        codigoAtual = iProperties.Value("Custom", "Código")
+    Catch
+        iProperties.Value("Custom", "Código") = ""
+        codigoAtual = ""
+    End Try
+
+    Dim codigo As String
+    codigo = InputBox("Digite o código da peça/item:", _
+                      "Código da peça", _
+                      codigoAtual)
+
+    codigo = Trim(codigo)
+
+    If codigo <> "" Then
+        iProperties.Value("Custom", "Código") = codigo
+    End If
+
+    Return codigo
+
+End Function
+
+' ==========================================================
+' FUNÇÃO: SALVAR VARIÁVEIS COMUNS
+' ==========================================================
+
+Public Sub SalvarVariaveisComuns(ByVal tipoItem As String, _
+                                  ByVal material As String, _
+                                  ByVal acabamento As String, _
+                                  ByVal tratamento As String, _
+                                  ByVal dureza As String, _
+                                  ByVal processos As String, _
+                                  ByVal codigo As String)
+
+    iProperties.Value("Custom", "TipoItem") = tipoItem
+    iProperties.Value("Custom", "MaterialLegenda") = material
+    iProperties.Value("Custom", "AcabamentoLista") = acabamento
+    iProperties.Value("Custom", "Tratamento") = tratamento
+    iProperties.Value("Custom", "Dureza") = dureza
+    iProperties.Value("Custom", "Processos") = processos
+    iProperties.Value("Custom", "Código") = codigo
+
+End Sub
+
+' ==========================================================
+' FUNÇÃO: PERGUNTAR MATERIAL CONFORME TIPO
+' ==========================================================
+
+Public Function PerguntarMaterialPorTipo(ByVal tipoItem As String) As String
+
+    If tipoItem = "Chapa" Then
+        Return ObterValorListaEditavelSempre("MaterialLegenda", _
+                                             "Material da chapa", _
+                                             "Selecione um material existente:", _
+                                             "Ou digite um novo material:", _
+                                             "materiais_chapa.txt", _
+                                             "Chapa ASTM A36" & vbCrLf & _
+                                             "Chapa ASTM A572 Gr.50" & vbCrLf & _
+                                             "Chapa ASTM A500 Gr.C" & vbCrLf & _
+                                             "Chapa Inox AISI 304" & vbCrLf & _
+                                             "Chapa Inox AISI 316" & vbCrLf & _
+                                             "Chapa Alumínio 6061-T6", _
+                                             "Chapa ASTM A36")
+    ElseIf tipoItem = "Tubo Quadrado/Retangular" Or tipoItem = "Tubo Quadrado" Or tipoItem = "Metalon" Then
+        Return ObterValorListaEditavelSempre("MaterialLegenda", _
+                                             "Material do tubo quadrado/retangular", _
+                                             "Selecione um material existente:", _
+                                             "Ou digite um novo material:", _
+                                             "materiais_tubo_quadrado.txt", _
+                                             "Tubo Quadrado ABNT NBR 6591 (Industrial)" & vbCrLf & _
+                                             "Tubo Quadrado ABNT NBR 8261 Gr. C (Estrutural Brasil)" & vbCrLf & _
+                                             "Tubo Quadrado ASTM A500/A500M (Estrutural Americano)", _
+                                             "Tubo Quadrado ABNT NBR 6591 (Industrial)")
+    ElseIf tipoItem = "Tubo Redondo" Then
+        Return ObterValorListaEditavelSempre("MaterialLegenda", _
+                                             "Material do tubo redondo", _
+                                             "Selecione um material existente:", _
+                                             "Ou digite um novo material:", _
+                                             "materiais_tubo_redondo.txt", _
+                                             "Tubo Redondo ASTM A519 - SAE 4140" & vbCrLf & _
+											 "Tubo Redondo ASTM A519 - SAE 4340" & vbCrLf & _
+											 "Tubo Inox AISI 304" & vbCrLf & _
+											 "Tubo Inox AISI 316", _
+											 "Tubo Redondo ASTM A519 - SAE 4340")
+    ElseIf tipoItem = "Eixo" Then
+        Return ObterValorListaEditavelSempre("MaterialLegenda", _
+                                             "Material do eixo", _
+                                             "Selecione um material existente:", _
+                                             "Ou digite um novo material:", _
+                                             "materiais_eixo.txt", _
+                                             "Tarugo de Aço SAE 1020" & vbCrLf & _
+                                             "Tarugo de Aço SAE 1045" & vbCrLf & _
+                                             "Tarugo de Aço SAE 4140" & vbCrLf & _
+                                             "Tarugo de Aço SAE 4340" & vbCrLf & _
+                                             "Tarugo de Inox AISI 304" & vbCrLf & _
+                                             "Tarugo de Inox AISI 316", _
+                                             "Tarugo de Aço SAE 1045")
+    End If
+
+    Return ""
+
+End Function
+
+' ==========================================================
+' FUNÇÃO: PERGUNTAR ACABAMENTO
+' ==========================================================
+
+Public Function PerguntarAcabamento() As String
+
+    Return ObterValorListaEditavelSempre("AcabamentoLista", _
+                                         "Acabamento da peça", _
+                                         "Selecione um acabamento existente:", _
+                                         "Ou digite um novo acabamento:", _
+                                         "acabamentos.txt", _
+                                         "Pintura Preto Fosco" & vbCrLf & _
+                                         "Pintura Preto Brilhante" & vbCrLf & _
+                                         "Pintura Amarelo Segurança" & vbCrLf & _
+                                         "Galvanizado" & vbCrLf & _
+                                         "Zincado" & vbCrLf & _
+										 "Sem costura" & vbCrLf & _
+                                         "Sem acabamento", _
+                                         "Pintura Preto Fosco")
+
+End Function
+
+
+' ==========================================================
+' FUNÇÃO: PERGUNTAR TipoItem
+' ==========================================================
+
+Public Function PerguntarTipoItem() As String
+
+    Dim tipoAtual As String
+    tipoAtual = ""
+
+    Try
+        tipoAtual = iProperties.Value("Custom", "TipoItem")
+    Catch
+        iProperties.Value("Custom", "TipoItem") = ""
+        tipoAtual = ""
+    End Try
+
+    Dim listaTipos As New ArrayList
+
+    listaTipos.Add("Chapa")
+    listaTipos.Add("Tubo Quadrado/Retangular")
+    listaTipos.Add("Tubo Redondo")
+    listaTipos.Add("Eixo")
+
+    Dim valorPadrao As String
+    valorPadrao = "Chapa"
+
+    If tipoAtual = "Tubo Quadrado" Or tipoAtual = "Metalon" Then
+        valorPadrao = "Tubo Quadrado/Retangular"
+    ElseIf listaTipos.Contains(tipoAtual) Then
+        valorPadrao = tipoAtual
+    End If
+
+    Dim tipo As String
+    tipo = InputListBox("Selecione o tipo de item:", _
+                        listaTipos, _
+                        valorPadrao, _
+                        "Tipo de item", _
+                        "Tipos disponíveis")
+
+    If Trim(tipo) <> "" Then
+        iProperties.Value("Custom", "TipoItem") = tipo
+    End If
+
+    Return tipo
+
+End Function
+
+' ==========================================================
+' FUNÇÃO PARCIAL: CHAPA
+' ==========================================================
+
+Public Sub Atualizar_Chapa(ByVal oDoc As PartDocument)
+
+    ' ======================================================
+    ' Converte para Sheet Metal somente quando TipoItem = Chapa
+    ' ======================================================
+
+    Dim oSMDef As SheetMetalComponentDefinition
+    oSMDef = GarantirSheetMetalParaChapa(oDoc)
+
+    If oSMDef Is Nothing Then
+        Exit Sub
+    End If
+
+    ' ======================================================
+    ' Verifica/cria a planificação
+    ' ======================================================
+
+    Try
+        If oSMDef.HasFlatPattern = False Then
+            oSMDef.Unfold()
+
+            Try
+                oSMDef.FlatPattern.ExitEdit()
+            Catch
+            End Try
+        End If
+    Catch ex As Exception
+        MessageBox.Show("Não foi possível criar a planificação da peça." & vbCrLf & _
+                        "Verifique se a peça está corretamente configurada como Sheet Metal e se possui face fixa/A-Side válida." & vbCrLf & vbCrLf & _
+                        "Detalhe: " & ex.Message, _
+                        "Erro ao criar planificação")
+        Exit Sub
+    End Try
+
+    InventorVb.DocumentUpdate()
+
+    ' ======================================================
+    ' Pega medidas da planificação
+    ' ======================================================
+
+    Dim comprimentoFlat As Double
+    Dim larguraFlat As Double
+
+    Try
+        comprimentoFlat = SheetMetal.FlatExtentsLength
+        larguraFlat = SheetMetal.FlatExtentsWidth
+    Catch ex As Exception
+        MessageBox.Show("Não foi possível ler SheetMetal.FlatExtentsLength ou SheetMetal.FlatExtentsWidth." & vbCrLf & _
+                        "Detalhe: " & ex.Message, _
+                        "Erro ao ler planificação")
+        Exit Sub
+    End Try
+
+    Dim comprimentoMm As Double
+    Dim larguraMm As Double
+
+    If comprimentoFlat >= larguraFlat Then
+        comprimentoMm = comprimentoFlat
+        larguraMm = larguraFlat
+    Else
+        comprimentoMm = larguraFlat
+        larguraMm = comprimentoFlat
+    End If
+
+    ' ======================================================
+    ' Pega espessura
+    ' Prioridade:
+    ' 1. espessura_user
+    ' 2. Thickness
+    ' 3. espessura da definição Sheet Metal
+    ' ======================================================
+
+    Dim espessuraMm As Double
+
+    Try
+        espessuraMm = Parameter("espessura_user")
+    Catch
+        Try
+            espessuraMm = Parameter("Thickness")
+        Catch
+            Try
+                espessuraMm = oSMDef.Thickness.Value * 10
+            Catch
+                MessageBox.Show("Não foi possível identificar a espessura da chapa." & vbCrLf & _
+                                "Crie o parâmetro 'espessura_user' ou verifique a regra de chapa metálica.", _
+                                "Erro iLogic")
+                Exit Sub
+            End Try
+        End Try
+    End Try
+
+    Dim comprimentoTxt As String
+    Dim larguraTxt As String
+    Dim espessuraTxt As String
+
+    comprimentoTxt = FormatarMm(comprimentoMm)
+    larguraTxt = FormatarMm(larguraMm)
+    espessuraTxt = FormatarMm(espessuraMm)
+
+    Dim materialPadrao As String
+    materialPadrao = LerIPropertyCustom("MaterialLegenda", "")
+
+    Dim acabamentoLista As String
+    acabamentoLista = LerIPropertyCustom("AcabamentoLista", "")
+
+    Dim tratamentoTxt As String
+    tratamentoTxt = LerIPropertyCustom("Tratamento", "N/A")
+
+    Dim durezaTxt As String
+    durezaTxt = LerIPropertyCustom("Dureza", "N/A")
+
+    Dim medidasTxt As String
+    medidasTxt = comprimentoTxt & " x " & larguraTxt & " x " & espessuraTxt
+
+    Dim descricaoTxt As String
+    descricaoTxt = UCase(materialPadrao) & " - " & medidasTxt
+
+    InventorVb.DocumentUpdate()
+
+    Dim massaKg As Double
+    massaKg = oDoc.ComponentDefinition.MassProperties.Mass
+
+    Dim pesoTxt As String
+    pesoTxt = Replace(Round(massaKg, 2).ToString(), ".", ",") & " kg"
+
+    iProperties.Value("Custom", "TipoItem") = "Chapa"
+    iProperties.Value("Custom", "MaterialLegenda") = materialPadrao
+
+    iProperties.Value("Custom", "ComprimentoLegenda") = comprimentoTxt
+    iProperties.Value("Custom", "LarguraLegenda") = larguraTxt
+    iProperties.Value("Custom", "EspessuraLegenda") = espessuraTxt
+
+    iProperties.Value("Custom", "MedidasLegenda") = medidasTxt
+    iProperties.Value("Custom", "PesoLegenda") = pesoTxt
+    iProperties.Value("Custom", "DescricaoAutomatica") = descricaoTxt
+
+    iProperties.Value("Custom", "AcabamentoLista") = acabamentoLista
+    iProperties.Value("Custom", "Tratamento") = tratamentoTxt
+    iProperties.Value("Custom", "Dureza") = durezaTxt
+    iProperties.Value("Custom", "Processos") = LerIPropertyCustom("Processos", "N/A")
+    iProperties.Value("Custom", "Código") = LerIPropertyCustom("Código", "")
+
+    iProperties.Value("Project", "Description") = descricaoTxt
+
+    InventorVb.DocumentUpdate()
+
+    MessageBox.Show("iProperties atualizadas com sucesso!" & vbCrLf & _
+                    "TipoItem: Chapa" & vbCrLf & _
+                    "Material: " & materialPadrao & vbCrLf & _
+                    "Medidas planificadas: " & medidasTxt & vbCrLf & _
+                    "Peso: " & pesoTxt & vbCrLf & _
+                    "Acabamento: " & acabamentoLista & vbCrLf & _
+                    "Tratamento: " & tratamentoTxt & vbCrLf & _
+                    "Dureza: " & durezaTxt & vbCrLf & _
+                    "Processos: " & LerIPropertyCustom("Processos", "N/A") & vbCrLf & _
+                    "Código: " & LerIPropertyCustom("Código", ""), _
+                    "Atualização concluída")
+
+End Sub
+
+
+
+' ==========================================================
+' FUNÇÃO PARCIAL: TUBO REDONDO
+' ==========================================================
+
+Public Sub Atualizar_Tubo_Redondo(ByVal oDoc As PartDocument)
+
+    InventorVb.DocumentUpdate()
+
+    Dim maiorDiametroMm As Double
+    maiorDiametroMm = 0
+
+    Try
+        Dim oBody As SurfaceBody
+        Dim oFace As Face
+
+        For Each oBody In oDoc.ComponentDefinition.SurfaceBodies
+            If oBody.IsSolid Then
+                For Each oFace In oBody.Faces
+                    Try
+                        If oFace.SurfaceType = SurfaceTypeEnum.kCylinderSurface Then
+                            Dim oCyl As Cylinder
+                            oCyl = oFace.Geometry
+
+                            Dim diametroAtualMm As Double
+                            diametroAtualMm = oCyl.Radius * 2 * 10
+
+                            If diametroAtualMm > maiorDiametroMm Then
+                                maiorDiametroMm = diametroAtualMm
+                            End If
+                        End If
+                    Catch
+                    End Try
+                Next
+            End If
+        Next
+    Catch ex As Exception
+        MessageBox.Show("Erro ao analisar faces cilíndricas do tubo redondo." & vbCrLf & _
+                        "Detalhe: " & ex.Message, _
+                        "Erro iLogic")
+        Exit Sub
+    End Try
+
+    If maiorDiametroMm <= 0 Then
+        Try
+            maiorDiametroMm = Parameter("diametro_user")
+        Catch
+            maiorDiametroMm = 0
+        End Try
+    End If
+
+    If maiorDiametroMm <= 0 Then
+        Dim diametroInput As String
+        diametroInput = InputBox("Não foi possível identificar automaticamente o diâmetro do tubo redondo." & vbCrLf & _
+                                 "Informe o diâmetro externo em mm:" & vbCrLf & _
+                                 "Exemplo: 50", _
+                                 "Diâmetro do tubo redondo", _
+                                 "50")
+
+        If Trim(diametroInput) = "" Then
+            MessageBox.Show("Diâmetro do tubo redondo não informado. A regra será encerrada.", "iLogic")
+            Exit Sub
+        End If
+
+        Try
+            diametroInput = Replace(diametroInput, ",", ".")
+            maiorDiametroMm = CDbl(diametroInput)
+        Catch
+            MessageBox.Show("Valor de diâmetro inválido: " & diametroInput, "Erro iLogic")
+            Exit Sub
+        End Try
+    End If
+
+    Dim comprimentoTotalMm As Double
+    comprimentoTotalMm = 0
+
+    Try
+        Dim oBox As Box
+        oBox = oDoc.ComponentDefinition.RangeBox
+
+        Dim dxMm As Double
+        Dim dyMm As Double
+        Dim dzMm As Double
+
+        dxMm = Abs(oBox.MaxPoint.X - oBox.MinPoint.X) * 10
+        dyMm = Abs(oBox.MaxPoint.Y - oBox.MinPoint.Y) * 10
+        dzMm = Abs(oBox.MaxPoint.Z - oBox.MinPoint.Z) * 10
+
+        comprimentoTotalMm = dxMm
+
+        If dyMm > comprimentoTotalMm Then
+            comprimentoTotalMm = dyMm
+        End If
+
+        If dzMm > comprimentoTotalMm Then
+            comprimentoTotalMm = dzMm
+        End If
+    Catch ex As Exception
+        MessageBox.Show("Erro ao calcular o comprimento total do tubo redondo pelo RangeBox." & vbCrLf & _
+                        "Detalhe: " & ex.Message, _
+                        "Erro iLogic")
+        Exit Sub
+    End Try
+
+    Dim espessuraMm As Double
+    espessuraMm = 0
+
+    ' ======================================================
+    ' Pega a espessura real do tubo redondo diretamente da geometria.
+    ' Não usa espessura_user nem EspessuraLegenda como primeira fonte,
+    ' para evitar reaproveitar valor antigo/incorreto como 6,35 mm.
+    '
+    ' Método:
+    ' - maior raio cilíndrico = raio externo
+    ' - maior raio cilíndrico menor que o externo = raio interno
+    ' - espessura = raio externo - raio interno
+    ' ======================================================
+
+    Try
+        espessuraMm = ObterEspessuraParedeTuboRedondo(oDoc)
+    Catch
+        espessuraMm = 0
+    End Try
+
+    If espessuraMm <= 0 Then
+        MessageBox.Show("Não foi possível identificar automaticamente a espessura real do tubo redondo." & vbCrLf & _
+                        "Verifique se o tubo possui parede interna modelada como face cilíndrica.", _
+                        "Erro iLogic")
+        Exit Sub
+    End If
+
+    CriarOuAtualizarParametroMm(oDoc, "comprimento_user", comprimentoTotalMm)
+    CriarOuAtualizarParametroMm(oDoc, "diametro_user", maiorDiametroMm)
+    CriarOuAtualizarParametroMm(oDoc, "espessura_user", espessuraMm)
+
+    Dim diametroTxt As String
+    Dim comprimentoTxt As String
+    Dim espessuraTxt As String
+    Dim medidasTxt As String
+
+    diametroTxt = "Ø" & Replace(Round(maiorDiametroMm, 2).ToString(), ".", ",") & " mm"
+    comprimentoTxt = FormatarMm(comprimentoTotalMm)
+    espessuraTxt = FormatarMm(espessuraMm)
+    medidasTxt = diametroTxt & " x " & comprimentoTxt & " x " & espessuraTxt
+
+    Dim materialPadrao As String
+    materialPadrao = LerIPropertyCustom("MaterialLegenda", "")
+
+    Dim acabamentoLista As String
+    acabamentoLista = LerIPropertyCustom("AcabamentoLista", "")
+
+    Dim tratamentoTxt As String
+    tratamentoTxt = LerIPropertyCustom("Tratamento", "N/A")
+
+    Dim durezaTxt As String
+    durezaTxt = LerIPropertyCustom("Dureza", "N/A")
+
+    Dim processosTxt As String
+    processosTxt = LerIPropertyCustom("Processos", "N/A")
+
+    Dim descricaoTxt As String
+    descricaoTxt = UCase(materialPadrao) & " - " & medidasTxt
+
+    InventorVb.DocumentUpdate()
+
+    Dim massaKg As Double
+    massaKg = oDoc.ComponentDefinition.MassProperties.Mass
+
+    Dim pesoTxt As String
+    pesoTxt = Replace(Round(massaKg, 2).ToString(), ".", ",") & " kg"
+
+    iProperties.Value("Custom", "TipoItem") = "Tubo Redondo"
+    iProperties.Value("Custom", "Diametro") = diametroTxt
+    iProperties.Value("Custom", "Comprimento") = comprimentoTxt
+    iProperties.Value("Custom", "DiametroLegenda") = diametroTxt
+    iProperties.Value("Custom", "ComprimentoLegenda") = comprimentoTxt
+    iProperties.Value("Custom", "EspessuraLegenda") = espessuraTxt
+    iProperties.Value("Custom", "MedidasLegenda") = medidasTxt
+    iProperties.Value("Custom", "PesoLegenda") = pesoTxt
+    iProperties.Value("Custom", "DescricaoAutomatica") = descricaoTxt
+    iProperties.Value("Custom", "MaterialLegenda") = materialPadrao
+    iProperties.Value("Custom", "AcabamentoLista") = acabamentoLista
+    iProperties.Value("Custom", "Tratamento") = tratamentoTxt
+    iProperties.Value("Custom", "Dureza") = durezaTxt
+    iProperties.Value("Custom", "Processos") = processosTxt
+    iProperties.Value("Project", "Description") = descricaoTxt
+
+    InventorVb.DocumentUpdate()
+
+    MessageBox.Show("iProperties atualizadas com sucesso!" & vbCrLf & _
+                    "TipoItem: Tubo Redondo" & vbCrLf & _
+                    "Diâmetro externo: " & diametroTxt & vbCrLf & _
+                    "Comprimento total: " & comprimentoTxt & vbCrLf & _
+                    "Espessura da parede: " & espessuraTxt & vbCrLf & _
+                    "Medidas: " & medidasTxt & vbCrLf & _
+                    "Peso: " & pesoTxt & vbCrLf & _
+                    "Material: " & materialPadrao & vbCrLf & _
+                    "Acabamento: " & acabamentoLista & vbCrLf & _
+                    "Tratamento: " & tratamentoTxt & vbCrLf & _
+                    "Dureza: " & durezaTxt & vbCrLf & _
+                    "Processos: " & processosTxt & vbCrLf & _
+                    "Código: " & LerIPropertyCustom("Código", ""), _
+                    "Atualização concluída")
+
+End Sub
+
+' ==========================================================
+' FUNÇÃO PARCIAL: TUBO QUADRADO
+' Estrutura inicial. Vamos detalhar as medidas depois.
+' ==========================================================
+
+Public Sub Atualizar_Tubo_Quadrado(ByVal oDoc As PartDocument)
+
+    InventorVb.DocumentUpdate()
+
+    ' ======================================================
+    ' TUBO QUADRADO - Dimensões corrigidas
+    '
+    ' Objetivo:
+    ' - Pegar Altura, Largura e Comprimento pelo RangeBox da peça
+    ' - Pegar Espessura pela parede real da geometria, quando possível
+    '
+    ' Ordem em MedidasLegenda:
+    '   Altura x Largura x Comprimento x Espessura
+    '
+    ' Exemplo:
+    '   Tubo Quadrado 150 x 100 x 500 x 3 mm
+    '
+    ' Regra:
+    ' - Maior dimensão do RangeBox = Comprimento
+    ' - Dimensão intermediária = Altura
+    ' - Menor dimensão = Largura
+    ' - Espessura = menor distância entre faces planas paralelas
+    '               da parede do metalon
+    '
+    ' Observação:
+    ' - Se a espessura real da parede não puder ser identificada
+    '   pela geometria, a regra usa espessura_user/iProperty/manual
+    '   como fallback.
+    ' ======================================================
+
+    Dim comprimentoTotalMm As Double
+    Dim larguraSecaoMm As Double
+    Dim alturaSecaoMm As Double
+    Dim espessuraMm As Double
+
+    comprimentoTotalMm = 0
+    larguraSecaoMm = 0
+    alturaSecaoMm = 0
+    espessuraMm = 0
+
+    ' ======================================================
+    ' Calcula dimensões pelo RangeBox
+    ' RangeBox retorna em cm; conversão para mm = * 10
+    ' ======================================================
+
+    Try
+        Dim oBox As Box
+        oBox = oDoc.ComponentDefinition.RangeBox
+
+        Dim dxMm As Double
+        Dim dyMm As Double
+        Dim dzMm As Double
+
+        dxMm = Abs(oBox.MaxPoint.X - oBox.MinPoint.X) * 10
+        dyMm = Abs(oBox.MaxPoint.Y - oBox.MinPoint.Y) * 10
+        dzMm = Abs(oBox.MaxPoint.Z - oBox.MinPoint.Z) * 10
+
+        ' Ordenação decrescente:
+        ' d1 >= d2 >= d3
+        Dim d1 As Double
+        Dim d2 As Double
+        Dim d3 As Double
+
+        d1 = dxMm
+        d2 = dyMm
+        d3 = dzMm
+
+        Dim tempDim As Double
+
+        If d2 > d1 Then
+            tempDim = d1
+            d1 = d2
+            d2 = tempDim
+        End If
+
+        If d3 > d1 Then
+            tempDim = d1
+            d1 = d3
+            d3 = tempDim
+        End If
+
+        If d3 > d2 Then
+            tempDim = d2
+            d2 = d3
+            d3 = tempDim
+        End If
+
+        comprimentoTotalMm = d1
+        alturaSecaoMm = d2
+        larguraSecaoMm = d3
+
+    Catch ex As Exception
+
+        MessageBox.Show("Erro ao calcular as dimensões do tubo quadrado pelo RangeBox." & vbCrLf & _
+                        "Detalhe: " & ex.Message, _
+                        "Erro iLogic")
+        Exit Sub
+
+    End Try
+
+    If comprimentoTotalMm <= 0 Or larguraSecaoMm <= 0 Or alturaSecaoMm <= 0 Then
+        MessageBox.Show("Não foi possível determinar altura, largura e comprimento do tubo quadrado.", "Erro iLogic")
+        Exit Sub
+    End If
+
+    ' ======================================================
+    ' Pega espessura pela parede real da peça.
+    ' Não usa espessura_user nem EspessuraLegenda como fallback,
+    ' para evitar reaproveitar valor antigo/incorreto.
+    ' ======================================================
+
+    Try
+        espessuraMm = ObterEspessuraParedeMetalon(oDoc)
+    Catch
+        espessuraMm = 0
+    End Try
+
+    If espessuraMm <= 0 Then
+        MessageBox.Show("Não foi possível identificar automaticamente a espessura real da parede do tubo quadrado/retangular." & vbCrLf & _
+                        "Verifique se o tubo possui faces internas e externas modeladas.", _
+                        "Erro iLogic")
+        Exit Sub
+    End If
+
+    ' Garante que Altura seja a maior dimensão da seção
+    ' e Largura seja a menor dimensão da seção.
+    If larguraSecaoMm > alturaSecaoMm Then
+        Dim tempSecao As Double
+        tempSecao = alturaSecaoMm
+        alturaSecaoMm = larguraSecaoMm
+        larguraSecaoMm = tempSecao
+    End If
+
+    ' Sobrescreve parâmetros para manter tudo atualizado.
+    CriarOuAtualizarParametroMm(oDoc, "comprimento_user", comprimentoTotalMm)
+    CriarOuAtualizarParametroMm(oDoc, "altura_user", alturaSecaoMm)
+    CriarOuAtualizarParametroMm(oDoc, "largura_user", larguraSecaoMm)
+    CriarOuAtualizarParametroMm(oDoc, "espessura_user", espessuraMm)
+
+    ' ======================================================
+    ' Formata textos
+    ' ======================================================
+
+    Dim comprimentoTxt As String
+    Dim larguraTxt As String
+    Dim alturaTxt As String
+    Dim espessuraTxt As String
+    Dim medidasTxt As String
+
+    comprimentoTxt = FormatarMm(comprimentoTotalMm)
+    alturaTxt = FormatarMm(alturaSecaoMm)
+    larguraTxt = FormatarMm(larguraSecaoMm)
+    espessuraTxt = FormatarMm(espessuraMm)
+
+    ' Ordem solicitada:
+    ' Altura x Largura x Comprimento x Espessura
+    medidasTxt = alturaTxt & " x " & larguraTxt & " x " & comprimentoTxt & " x " & espessuraTxt
+
+    ' ======================================================
+    ' Material, acabamento, tratamento e dureza
+    ' ======================================================
+
+    Dim materialPadrao As String
+    materialPadrao = LerIPropertyCustom("MaterialLegenda", "")
+
+    Dim acabamentoLista As String
+    acabamentoLista = LerIPropertyCustom("AcabamentoLista", "")
+
+    Dim tratamentoTxt As String
+    tratamentoTxt = LerIPropertyCustom("Tratamento", "N/A")
+
+    Dim durezaTxt As String
+    durezaTxt = LerIPropertyCustom("Dureza", "N/A")
+
+    Dim descricaoTxt As String
+    descricaoTxt = UCase(materialPadrao) & " - " & medidasTxt
+
+    ' ======================================================
+    ' Calcula peso
+    ' ======================================================
+
+    InventorVb.DocumentUpdate()
+
+    Dim massaKg As Double
+    massaKg = oDoc.ComponentDefinition.MassProperties.Mass
+
+    Dim pesoTxt As String
+    pesoTxt = Replace(Round(massaKg, 2).ToString(), ".", ",") & " kg"
+
+    ' ======================================================
+    ' Cria/alimenta iProperties Custom
+    ' ======================================================
+
+    iProperties.Value("Custom", "TipoItem") = LerIPropertyCustom("TipoItem", "")
+
+    iProperties.Value("Custom", "Altura") = alturaTxt
+    iProperties.Value("Custom", "Largura") = larguraTxt
+    iProperties.Value("Custom", "Comprimento") = comprimentoTxt
+
+    iProperties.Value("Custom", "AlturaLegenda") = alturaTxt
+    iProperties.Value("Custom", "LarguraLegenda") = larguraTxt
+    iProperties.Value("Custom", "ComprimentoLegenda") = comprimentoTxt
+    iProperties.Value("Custom", "EspessuraLegenda") = espessuraTxt
+
+    iProperties.Value("Custom", "MedidasLegenda") = medidasTxt
+    iProperties.Value("Custom", "PesoLegenda") = pesoTxt
+    iProperties.Value("Custom", "DescricaoAutomatica") = descricaoTxt
+
+    iProperties.Value("Custom", "MaterialLegenda") = materialPadrao
+    iProperties.Value("Custom", "AcabamentoLista") = acabamentoLista
+    iProperties.Value("Custom", "Tratamento") = tratamentoTxt
+    iProperties.Value("Custom", "Dureza") = durezaTxt
+    iProperties.Value("Custom", "Processos") = LerIPropertyCustom("Processos", "N/A")
+    iProperties.Value("Custom", "Código") = LerIPropertyCustom("Código", "")
+
+    iProperties.Value("Project", "Description") = descricaoTxt
+
+    InventorVb.DocumentUpdate()
+
+    MessageBox.Show("iProperties atualizadas com sucesso!" & vbCrLf & _
+                    "TipoItem: Tubo Quadrado" & vbCrLf & _
+                    "Altura: " & alturaTxt & vbCrLf & _
+                    "Largura: " & larguraTxt & vbCrLf & _
+                    "Comprimento: " & comprimentoTxt & vbCrLf & _
+                    "Espessura da parede: " & espessuraTxt & vbCrLf & _
+                    "Medidas: " & medidasTxt & vbCrLf & _
+                    "Peso: " & pesoTxt & vbCrLf & _
+                    "Material: " & materialPadrao & vbCrLf & _
+                    "Acabamento: " & acabamentoLista & vbCrLf & _
+                    "Tratamento: " & tratamentoTxt & vbCrLf & _
+                    "Dureza: " & durezaTxt & vbCrLf & _
+                    "Processos: " & LerIPropertyCustom("Processos", "N/A") & vbCrLf & _
+                    "Código: " & LerIPropertyCustom("Código", ""), _
+                    "Atualização concluída")
+
+End Sub
+
+
+' ==========================================================
+' FUNÇÃO PARCIAL: EIXO
+'
+' Objetivo:
+' - Analisar faces cilíndricas da peça
+' - Pegar o maior diâmetro encontrado como bitola/material bruto
+' - Calcular o comprimento total pelo RangeBox da peça
+' - Criar/alimentar campos:
+'     Diametro
+'     Comprimento
+'     DiametroLegenda
+'     ComprimentoLegenda
+'     MedidasLegenda
+'     PesoLegenda
+'     DescricaoAutomatica
+' ==========================================================
+
+Public Sub Atualizar_Eixo(ByVal oDoc As PartDocument)
+
+    InventorVb.DocumentUpdate()
+
+    Dim maiorDiametroMm As Double
+    maiorDiametroMm = 0
+
+    ' ======================================================
+    ' Procura o maior diâmetro cilíndrico nos corpos sólidos.
+    ' O Inventor trabalha internamente com comprimento em cm.
+    ' Raio em cm -> diâmetro em mm = raio * 2 * 10
+    ' ======================================================
+
+    Try
+
+        Dim oBody As SurfaceBody
+        Dim oFace As Face
+
+        For Each oBody In oDoc.ComponentDefinition.SurfaceBodies
+
+            If oBody.IsSolid Then
+
+                For Each oFace In oBody.Faces
+
+                    Try
+                        If oFace.SurfaceType = SurfaceTypeEnum.kCylinderSurface Then
+
+                            Dim oCyl As Cylinder
+                            oCyl = oFace.Geometry
+
+                            Dim diametroAtualMm As Double
+                            diametroAtualMm = oCyl.Radius * 2 * 10
+
+                            If diametroAtualMm > maiorDiametroMm Then
+                                maiorDiametroMm = diametroAtualMm
+                            End If
+
+                        End If
+                    Catch
+                        ' Ignora faces que não permitirem leitura da geometria.
+                    End Try
+
+                Next
+
+            End If
+
+        Next
+
+    Catch ex As Exception
+
+        MessageBox.Show("Erro ao analisar faces cilíndricas da peça." & vbCrLf & _
+                        "Detalhe: " & ex.Message, _
+                        "Erro iLogic")
+        Exit Sub
+
+    End Try
+
+    If maiorDiametroMm <= 0 Then
+        MessageBox.Show("Nenhuma face cilíndrica foi encontrada." & vbCrLf & _
+                        "Não foi possível determinar o diâmetro do eixo.", _
+                        "Erro iLogic")
+        Exit Sub
+    End If
+
+    ' ======================================================
+    ' Calcula o comprimento real do eixo.
+    '
+    ' Correção:
+    ' - Antes era usado apenas o maior lado do RangeBox.
+    ' - Em alguns eixos, principalmente em peças vindas de Sheet Metal
+    '   ou com orientação/caixa envolvente desfavorável, isso podia retornar
+    '   o próprio diâmetro como comprimento.
+    ' - Agora a prioridade é medir a extensão da maior face cilíndrica
+    '   ao longo do seu eixo geométrico.
+    ' - Se não conseguir, usa RangeBox como fallback corrigido.
+    ' ======================================================
+
+    Dim comprimentoTotalMm As Double
+    comprimentoTotalMm = ObterComprimentoEixoPorProjecaoTotal(oDoc, maiorDiametroMm)
+
+    If comprimentoTotalMm <= 0 Then
+        comprimentoTotalMm = ObterComprimentoEixoPorRangeBoxCorrigido(oDoc, maiorDiametroMm)
+    End If
+
+    If comprimentoTotalMm <= 0 Then
+        MessageBox.Show("Não foi possível determinar o comprimento total do eixo.", "Erro iLogic")
+        Exit Sub
+    End If
+
+    ' ======================================================
+    ' Formata textos
+    ' ======================================================
+
+    Dim diametroTxt As String
+    Dim comprimentoTxt As String
+    Dim medidasTxt As String
+
+    diametroTxt = "Ø" & Replace(Round(maiorDiametroMm, 2).ToString(), ".", ",") & " mm"
+    comprimentoTxt = FormatarMm(comprimentoTotalMm)
+    medidasTxt = diametroTxt & " x " & comprimentoTxt
+
+    ' ======================================================
+    ' Material, acabamento, tratamento e dureza
+    ' ======================================================
+
+    Dim materialPadrao As String
+    materialPadrao = LerIPropertyCustom("MaterialLegenda", "")
+
+    Dim acabamentoLista As String
+    acabamentoLista = LerIPropertyCustom("AcabamentoLista", "")
+
+    Dim tratamentoTxt As String
+    tratamentoTxt = LerIPropertyCustom("Tratamento", "N/A")
+
+    Dim durezaTxt As String
+    durezaTxt = LerIPropertyCustom("Dureza", "N/A")
+
+    Dim descricaoTxt As String
+    descricaoTxt = UCase(materialPadrao) & " - " & medidasTxt
+
+    ' ======================================================
+    ' Calcula peso
+    ' ======================================================
+
+    InventorVb.DocumentUpdate()
+
+    Dim massaKg As Double
+    massaKg = oDoc.ComponentDefinition.MassProperties.Mass
+
+    Dim pesoTxt As String
+    pesoTxt = Replace(Round(massaKg, 2).ToString(), ".", ",") & " kg"
+
+    ' ======================================================
+    ' Cria/alimenta iProperties Custom
+    ' ======================================================
+
+    iProperties.Value("Custom", "TipoItem") = "Eixo"
+
+    iProperties.Value("Custom", "Diametro") = diametroTxt
+    iProperties.Value("Custom", "Comprimento") = comprimentoTxt
+
+    iProperties.Value("Custom", "DiametroLegenda") = diametroTxt
+    iProperties.Value("Custom", "ComprimentoLegenda") = comprimentoTxt
+
+    ' Para eixo, espessura não se aplica.
+    ' Limpa o campo para evitar informação antiga vinda de outro tipo de peça.
+    iProperties.Value("Custom", "EspessuraLegenda") = ""
+
+    iProperties.Value("Custom", "MedidasLegenda") = medidasTxt
+    iProperties.Value("Custom", "PesoLegenda") = pesoTxt
+    iProperties.Value("Custom", "DescricaoAutomatica") = descricaoTxt
+
+    iProperties.Value("Custom", "MaterialLegenda") = materialPadrao
+    iProperties.Value("Custom", "AcabamentoLista") = acabamentoLista
+    iProperties.Value("Custom", "Tratamento") = tratamentoTxt
+    iProperties.Value("Custom", "Dureza") = durezaTxt
+    iProperties.Value("Custom", "Processos") = LerIPropertyCustom("Processos", "N/A")
+    iProperties.Value("Custom", "Código") = LerIPropertyCustom("Código", "")
+
+    iProperties.Value("Project", "Description") = descricaoTxt
+
+    InventorVb.DocumentUpdate()
+
+    MessageBox.Show("iProperties atualizadas com sucesso!" & vbCrLf & _
+                    "TipoItem: Eixo" & vbCrLf & _
+                    "Diâmetro / bitola: " & diametroTxt & vbCrLf & _
+                    "Comprimento total: " & comprimentoTxt & vbCrLf & _
+                    "Medidas: " & medidasTxt & vbCrLf & _
+                    "Peso: " & pesoTxt & vbCrLf & _
+                    "Material: " & materialPadrao & vbCrLf & _
+                    "Acabamento: " & acabamentoLista & vbCrLf & _
+                    "Tratamento: " & tratamentoTxt & vbCrLf & _
+                    "Dureza: " & durezaTxt & vbCrLf & _
+                    "Processos: " & LerIPropertyCustom("Processos", "N/A") & vbCrLf & _
+                    "Código: " & LerIPropertyCustom("Código", ""), _
+                    "Atualização concluída")
+
+End Sub
+
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: COMPRIMENTO DO EIXO PELA FACE CILÍNDRICA
+'
+' Mede a extensão das faces cilíndricas principais ao longo do eixo
+' real do cilindro. Isso evita retornar diâmetro como comprimento.
+' ==========================================================
+
+Public Function ObterComprimentoEixoPorProjecaoTotal(ByVal oDoc As PartDocument, _
+                                                      ByVal diametroReferenciaMm As Double) As Double
+
+    ' ======================================================
+    ' Correção para eixo com mais de um extrude / degraus:
+    ' - Primeiro identifica o eixo geométrico de uma face cilíndrica
+    '   com diâmetro igual ao maior diâmetro encontrado.
+    ' - Depois NÃO mede somente essa face.
+    ' - Mede todos os vértices do corpo projetados nesse eixo.
+    ' Assim, se o eixo tiver um trecho de 20 mm + outro de 10 mm,
+    ' o comprimento retornado será 30 mm, e não apenas 20 mm.
+    ' ======================================================
+
+    Dim comprimentoEncontradoMm As Double
+    comprimentoEncontradoMm = 0
+
+    Try
+
+        Dim toleranciaDiametroMm As Double
+        toleranciaDiametroMm = diametroReferenciaMm * 0.03
+
+        If toleranciaDiametroMm < 0.5 Then
+            toleranciaDiametroMm = 0.5
+        End If
+
+        Dim eixoEncontrado As Boolean
+        eixoEncontrado = False
+
+        Dim baseX As Double
+        Dim baseY As Double
+        Dim baseZ As Double
+
+        Dim axisX As Double
+        Dim axisY As Double
+        Dim axisZ As Double
+
+        baseX = 0
+        baseY = 0
+        baseZ = 0
+        axisX = 0
+        axisY = 0
+        axisZ = 0
+
+        Dim oBody As SurfaceBody
+        Dim oFace As Face
+
+        ' ==================================================
+        ' 1) Encontra o eixo real do eixo pela maior face cilíndrica.
+        ' ==================================================
+
+        For Each oBody In oDoc.ComponentDefinition.SurfaceBodies
+
+            If oBody.IsSolid Then
+
+                For Each oFace In oBody.Faces
+
+                    Try
+                        If oFace.SurfaceType = SurfaceTypeEnum.kCylinderSurface Then
+
+                            Dim oCyl As Cylinder
+                            oCyl = oFace.Geometry
+
+                            Dim diametroAtualMm As Double
+                            diametroAtualMm = oCyl.Radius * 2 * 10
+
+                            If Abs(diametroAtualMm - diametroReferenciaMm) <= toleranciaDiametroMm Then
+
+                                baseX = oCyl.BasePoint.X
+                                baseY = oCyl.BasePoint.Y
+                                baseZ = oCyl.BasePoint.Z
+
+                                axisX = oCyl.AxisVector.X
+                                axisY = oCyl.AxisVector.Y
+                                axisZ = oCyl.AxisVector.Z
+
+                                eixoEncontrado = True
+                                Exit For
+
+                            End If
+
+                        End If
+                    Catch
+                        ' Ignora faces cilíndricas que não permitirem leitura.
+                    End Try
+
+                Next
+
+            End If
+
+            If eixoEncontrado Then
+                Exit For
+            End If
+
+        Next
+
+        If eixoEncontrado = False Then
+            Return 0
+        End If
+
+        Dim normaA As Double
+        normaA = Math.Sqrt(axisX * axisX + axisY * axisY + axisZ * axisZ)
+
+        If normaA <= 0 Then
+            Return 0
+        End If
+
+        axisX = axisX / normaA
+        axisY = axisY / normaA
+        axisZ = axisZ / normaA
+
+        ' ==================================================
+        ' 2) Projeta TODOS os vértices dos corpos sólidos nesse eixo.
+        '    Isso pega o comprimento total real, incluindo extrudes
+        '    consecutivos, degraus, ressaltos e rebaixos coaxiais.
+        ' ==================================================
+
+        Dim minProj As Double
+        Dim maxProj As Double
+        Dim temPonto As Boolean
+
+        minProj = 0
+        maxProj = 0
+        temPonto = False
+
+        Dim oVert As Vertex
+
+        For Each oBody In oDoc.ComponentDefinition.SurfaceBodies
+
+            If oBody.IsSolid Then
+
+                For Each oVert In oBody.Vertices
+
+                    Try
+                        Dim px As Double
+                        Dim py As Double
+                        Dim pz As Double
+                        Dim proj As Double
+
+                        px = oVert.Point.X
+                        py = oVert.Point.Y
+                        pz = oVert.Point.Z
+
+                        proj = ((px - baseX) * axisX) + ((py - baseY) * axisY) + ((pz - baseZ) * axisZ)
+
+                        If temPonto = False Then
+                            minProj = proj
+                            maxProj = proj
+                            temPonto = True
+                        Else
+                            If proj < minProj Then
+                                minProj = proj
+                            End If
+
+                            If proj > maxProj Then
+                                maxProj = proj
+                            End If
+                        End If
+
+                    Catch
+                        ' Ignora vértices que não permitirem leitura.
+                    End Try
+
+                Next
+
+            End If
+
+        Next
+
+        If temPonto Then
+            comprimentoEncontradoMm = Abs(maxProj - minProj) * 10
+        End If
+
+    Catch
+        Return 0
+    End Try
+
+    Return comprimentoEncontradoMm
+
+End Function
+
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: FALLBACK DO COMPRIMENTO DO EIXO PELO RANGEBOX
+'
+' Usa o RangeBox apenas como alternativa. Prioriza uma dimensão que
+' seja diferente do diâmetro para evitar retornar Ø x Ø.
+' ==========================================================
+
+Public Function ObterComprimentoEixoPorRangeBoxCorrigido(ByVal oDoc As PartDocument, _
+                                                          ByVal diametroReferenciaMm As Double) As Double
+
+    Try
+        Dim oBox As Box
+        oBox = oDoc.ComponentDefinition.RangeBox
+
+        Dim dxMm As Double
+        Dim dyMm As Double
+        Dim dzMm As Double
+
+        dxMm = Abs(oBox.MaxPoint.X - oBox.MinPoint.X) * 10
+        dyMm = Abs(oBox.MaxPoint.Y - oBox.MinPoint.Y) * 10
+        dzMm = Abs(oBox.MaxPoint.Z - oBox.MinPoint.Z) * 10
+
+        Dim toleranciaMm As Double
+        toleranciaMm = diametroReferenciaMm * 0.05
+
+        If toleranciaMm < 1 Then
+            toleranciaMm = 1
+        End If
+
+        Dim melhorComprimentoMm As Double
+        melhorComprimentoMm = 0
+
+        If Abs(dxMm - diametroReferenciaMm) > toleranciaMm Then
+            If dxMm > melhorComprimentoMm Then
+                melhorComprimentoMm = dxMm
+            End If
+        End If
+
+        If Abs(dyMm - diametroReferenciaMm) > toleranciaMm Then
+            If dyMm > melhorComprimentoMm Then
+                melhorComprimentoMm = dyMm
+            End If
+        End If
+
+        If Abs(dzMm - diametroReferenciaMm) > toleranciaMm Then
+            If dzMm > melhorComprimentoMm Then
+                melhorComprimentoMm = dzMm
+            End If
+        End If
+
+        If melhorComprimentoMm > 0 Then
+            Return melhorComprimentoMm
+        End If
+
+        ' Último fallback: retorna a maior dimensão da caixa.
+        melhorComprimentoMm = dxMm
+
+        If dyMm > melhorComprimentoMm Then
+            melhorComprimentoMm = dyMm
+        End If
+
+        If dzMm > melhorComprimentoMm Then
+            melhorComprimentoMm = dzMm
+        End If
+
+        Return melhorComprimentoMm
+
+    Catch
+        Return 0
+    End Try
+
+End Function
+
+
+
+
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: OBTER ESPESSURA DA PAREDE DO TUBO REDONDO
+'
+' Mede a espessura diretamente pela geometria cilíndrica:
+' - maior raio encontrado = raio externo
+' - maior raio menor que o externo = raio interno
+' - espessura = diferença entre os raios
+' ==========================================================
+
+Public Function ObterEspessuraParedeTuboRedondo(ByVal oDoc As PartDocument) As Double
+
+    Dim maiorRaioCm As Double
+    Dim segundoMaiorRaioCm As Double
+
+    maiorRaioCm = 0
+    segundoMaiorRaioCm = 0
+
+    Try
+        Dim oBody As SurfaceBody
+        Dim oFace As Face
+
+        For Each oBody In oDoc.ComponentDefinition.SurfaceBodies
+
+            If oBody.IsSolid Then
+
+                For Each oFace In oBody.Faces
+
+                    Try
+                        If oFace.SurfaceType = SurfaceTypeEnum.kCylinderSurface Then
+
+                            Dim oCyl As Cylinder
+                            oCyl = oFace.Geometry
+
+                            Dim raioAtualCm As Double
+                            raioAtualCm = oCyl.Radius
+
+                            If raioAtualCm > maiorRaioCm Then
+                                segundoMaiorRaioCm = maiorRaioCm
+                                maiorRaioCm = raioAtualCm
+                            ElseIf raioAtualCm < maiorRaioCm And raioAtualCm > segundoMaiorRaioCm Then
+                                ' Evita considerar duas faces com o mesmo raio externo.
+                                If Abs(raioAtualCm - maiorRaioCm) > 0.001 Then
+                                    segundoMaiorRaioCm = raioAtualCm
+                                End If
+                            End If
+
+                        End If
+                    Catch
+                    End Try
+
+                Next
+
+            End If
+
+        Next
+
+    Catch
+        Return 0
+    End Try
+
+    If maiorRaioCm <= 0 Or segundoMaiorRaioCm <= 0 Then
+        Return 0
+    End If
+
+    Dim espessuraMm As Double
+    espessuraMm = Abs(maiorRaioCm - segundoMaiorRaioCm) * 10
+
+    ' Filtro de segurança: espessura precisa ser menor que 40% do raio externo.
+    If espessuraMm <= 0 Or espessuraMm >= (maiorRaioCm * 10 * 0.4) Then
+        Return 0
+    End If
+
+    Return espessuraMm
+
+End Function
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: OBTER ESPESSURA DA PAREDE DO METALON
+'
+' Estratégia:
+' - Identifica faces planas da peça.
+' - Agrupa planos por eixo principal X/Y/Z.
+' - Desconsidera o eixo do comprimento.
+' - Para os dois eixos da seção, procura a menor distância
+'   válida entre planos paralelos.
+'
+' Exemplo de seção 150 x 100 x 3:
+' - Planos externos/internos geram posições como:
+'     -75, -72, 72, 75
+'   A menor distância válida é 3 mm.
+' ==========================================================
+
+Public Function ObterEspessuraParedeMetalon(ByVal oDoc As PartDocument) As Double
+
+    Dim espessuraEncontrada As Double
+    espessuraEncontrada = 0
+
+    Dim dxMm As Double
+    Dim dyMm As Double
+    Dim dzMm As Double
+
+    Try
+        Dim oBox As Box
+        oBox = oDoc.ComponentDefinition.RangeBox
+
+        dxMm = Abs(oBox.MaxPoint.X - oBox.MinPoint.X) * 10
+        dyMm = Abs(oBox.MaxPoint.Y - oBox.MinPoint.Y) * 10
+        dzMm = Abs(oBox.MaxPoint.Z - oBox.MinPoint.Z) * 10
+    Catch
+        Return 0
+    End Try
+
+    Dim eixoComprimento As Integer
+    eixoComprimento = 0
+
+    If dyMm > dxMm And dyMm >= dzMm Then
+        eixoComprimento = 1
+    ElseIf dzMm > dxMm And dzMm >= dyMm Then
+        eixoComprimento = 2
+    Else
+        eixoComprimento = 0
+    End If
+
+    Dim posX As New ArrayList
+    Dim posY As New ArrayList
+    Dim posZ As New ArrayList
+
+    Try
+        Dim oBody As SurfaceBody
+        Dim oFace As Face
+
+        For Each oBody In oDoc.ComponentDefinition.SurfaceBodies
+
+            If oBody.IsSolid Then
+
+                For Each oFace In oBody.Faces
+
+                    Try
+                        If oFace.SurfaceType = SurfaceTypeEnum.kPlaneSurface Then
+
+                            Dim oPlane As Plane
+                            oPlane = oFace.Geometry
+
+                            Dim nx As Double
+                            Dim ny As Double
+                            Dim nz As Double
+
+                            nx = Abs(oPlane.Normal.X)
+                            ny = Abs(oPlane.Normal.Y)
+                            nz = Abs(oPlane.Normal.Z)
+
+                            If nx >= ny And nx >= nz Then
+                                posX.Add(oPlane.RootPoint.X * 10)
+                            ElseIf ny >= nx And ny >= nz Then
+                                posY.Add(oPlane.RootPoint.Y * 10)
+                            Else
+                                posZ.Add(oPlane.RootPoint.Z * 10)
+                            End If
+
+                        End If
+                    Catch
+                    End Try
+
+                Next
+
+            End If
+
+        Next
+
+    Catch
+        Return 0
+    End Try
+
+    Dim candidatoX As Double
+    Dim candidatoY As Double
+    Dim candidatoZ As Double
+
+    candidatoX = 0
+    candidatoY = 0
+    candidatoZ = 0
+
+    If eixoComprimento <> 0 Then
+        candidatoX = EspessuraPorFacesExternasEInternas(posX, dxMm)
+    End If
+
+    If eixoComprimento <> 1 Then
+        candidatoY = EspessuraPorFacesExternasEInternas(posY, dyMm)
+    End If
+
+    If eixoComprimento <> 2 Then
+        candidatoZ = EspessuraPorFacesExternasEInternas(posZ, dzMm)
+    End If
+
+    If candidatoX > 0 Then
+        espessuraEncontrada = candidatoX
+    End If
+
+    If candidatoY > 0 Then
+        If espessuraEncontrada <= 0 Or candidatoY < espessuraEncontrada Then
+            espessuraEncontrada = candidatoY
+        End If
+    End If
+
+    If candidatoZ > 0 Then
+        If espessuraEncontrada <= 0 Or candidatoZ < espessuraEncontrada Then
+            espessuraEncontrada = candidatoZ
+        End If
+    End If
+
+    Return espessuraEncontrada
+
+End Function
+
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: MENOR DISTÂNCIA VÁLIDA ENTRE PLANOS
+' ==========================================================
+
+Public Function MenorDistanciaValidaEntrePlanos(ByVal posicoes As ArrayList, _
+                                                ByVal dimensaoTotalMm As Double) As Double
+
+    Return EspessuraPorFacesExternasEInternas(posicoes, dimensaoTotalMm)
+
+End Function
+
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: ESPESSURA POR FACES EXTERNAS E INTERNAS
+'
+' Para tubo quadrado/retangular, mede a parede pela distância
+' entre a face externa e a face interna mais próxima do mesmo eixo.
+' Isso evita pegar distâncias aleatórias internas, como raio/corte/chanfro.
+' ==========================================================
+
+Public Function EspessuraPorFacesExternasEInternas(ByVal posicoes As ArrayList, _
+                                                   ByVal dimensaoTotalMm As Double) As Double
+
+    If posicoes Is Nothing Then
+        Return 0
+    End If
+
+    If posicoes.Count < 4 Then
+        Return 0
+    End If
+
+    Dim posicoesUnicas As New ArrayList
+
+    For Each item As Object In posicoes
+
+        Dim valor As Double
+        valor = CDbl(item)
+
+        Dim existe As Boolean
+        existe = False
+
+        For Each itemExistente As Object In posicoesUnicas
+            If Abs(CDbl(itemExistente) - valor) < 0.2 Then
+                existe = True
+                Exit For
+            End If
+        Next
+
+        If existe = False Then
+            posicoesUnicas.Add(valor)
+        End If
+
+    Next
+
+    If posicoesUnicas.Count < 4 Then
+        Return 0
+    End If
+
+    posicoesUnicas.Sort()
+
+    Dim espMin As Double
+    Dim espMax As Double
+    Dim espessura As Double
+
+    espMin = Abs(CDbl(posicoesUnicas(1)) - CDbl(posicoesUnicas(0)))
+    espMax = Abs(CDbl(posicoesUnicas(posicoesUnicas.Count - 1)) - CDbl(posicoesUnicas(posicoesUnicas.Count - 2)))
+
+    espessura = 0
+
+    If espMin > 0.2 And espMin <= (dimensaoTotalMm * 0.2) Then
+        espessura = espMin
+    End If
+
+    If espMax > 0.2 And espMax <= (dimensaoTotalMm * 0.2) Then
+        If espessura <= 0 Or espMax < espessura Then
+            espessura = espMax
+        End If
+    End If
+
+    Return espessura
+
+End Function
+
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: CRIAR OU ATUALIZAR PARÂMETRO EM MM
+' ==========================================================
+
+Public Sub CriarOuAtualizarParametroMm(ByVal oDoc As PartDocument, _
+                                        ByVal nomeParametro As String, _
+                                        ByVal valorMm As Double)
+
+    Try
+        Dim oParams As Parameters
+        oParams = oDoc.ComponentDefinition.Parameters
+
+        Dim oUserParams As UserParameters
+        oUserParams = oParams.UserParameters
+
+        Dim valorExpr As String
+        valorExpr = Replace(Round(valorMm, 4).ToString(), ",", ".") & " mm"
+
+        Try
+            oUserParams.Item(nomeParametro).Expression = valorExpr
+        Catch
+            oUserParams.AddByExpression(nomeParametro, valorExpr, UnitsTypeEnum.kMillimeterLengthUnits)
+        End Try
+
+    Catch
+        ' Se não conseguir criar/atualizar parâmetro, a regra segue usando iProperties.
+    End Try
+
+End Sub
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: FORMATAR MM
+' ==========================================================
+
+Public Function FormatarMm(ByVal valorMm As Double) As String
+
+    Return Replace(Round(valorMm, 2).ToString(), ".", ",") & " mm"
+
+End Function
+
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: PASTA DAS LISTAS
+' ==========================================================
+
+Public Function ObterPastaListas() As String
+
+    Dim pastaListas As String
+    pastaListas = "C:\Inventor_iLogic\listas"
+
+    If Not System.IO.Directory.Exists(pastaListas) Then
+        System.IO.Directory.CreateDirectory(pastaListas)
+    End If
+
+    Return pastaListas
+
+End Function
+
+
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: LISTA EDITÁVEL SEMPRE PERGUNTANDO
+' ==========================================================
+
+Public Function ObterValorListaEditavelSempre(ByVal nomeIProperty As String, _
+                                  ByVal tituloForm As String, _
+                                  ByVal textoLista As String, _
+                                  ByVal textoNovo As String, _
+                                  ByVal nomeArquivo As String, _
+                                  ByVal valoresIniciais As String, _
+                                  ByVal valorPadrao As String) As String
+
+    Dim valorAtual As String
+    valorAtual = ""
+
+    Try
+        valorAtual = iProperties.Value("Custom", nomeIProperty)
+    Catch
+        iProperties.Value("Custom", nomeIProperty) = ""
+        valorAtual = ""
+    End Try
+
+    Dim pastaListas As String
+    pastaListas = ObterPastaListas()
+
+    Dim arquivoLista As String
+    arquivoLista = pastaListas & "\" & nomeArquivo
+
+    If Not System.IO.File.Exists(arquivoLista) Then
+        System.IO.File.WriteAllText(arquivoLista, valoresIniciais)
+    End If
+
+    Dim listaValores As New ArrayList
+    Dim linhas() As String
+    linhas = System.IO.File.ReadAllLines(arquivoLista)
+
+    For Each linha As String In linhas
+        If Trim(linha) <> "" Then
+            If Not listaValores.Contains(Trim(linha)) Then
+                listaValores.Add(Trim(linha))
+            End If
+        End If
+    Next
+
+    If Trim(valorAtual) <> "" Then
+        If Not listaValores.Contains(Trim(valorAtual)) Then
+            listaValores.Add(Trim(valorAtual))
+        End If
+    End If
+
+    Dim frm As New System.Windows.Forms.Form()
+    frm.Text = tituloForm
+    frm.Width = 460
+    frm.Height = 360
+    frm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+    frm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+    frm.MaximizeBox = False
+    frm.MinimizeBox = False
+
+    Dim lblLista As New System.Windows.Forms.Label()
+    lblLista.Text = textoLista
+    lblLista.Left = 20
+    lblLista.Top = 20
+    lblLista.Width = 400
+    lblLista.Height = 20
+
+    Dim cmb As New System.Windows.Forms.ComboBox()
+    cmb.Left = 20
+    cmb.Top = 45
+    cmb.Width = 400
+    cmb.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList
+
+    For Each item As String In listaValores
+        cmb.Items.Add(item)
+    Next
+
+    If Trim(valorAtual) <> "" And cmb.Items.Contains(valorAtual) Then
+        cmb.SelectedItem = valorAtual
+    ElseIf cmb.Items.Count > 0 Then
+        cmb.SelectedIndex = 0
+    End If
+
+    Dim lblNovo As New System.Windows.Forms.Label()
+    lblNovo.Text = textoNovo
+    lblNovo.Left = 20
+    lblNovo.Top = 95
+    lblNovo.Width = 400
+    lblNovo.Height = 20
+
+    Dim txtNovo As New System.Windows.Forms.TextBox()
+    txtNovo.Left = 20
+    txtNovo.Top = 120
+    txtNovo.Width = 400
+
+    Dim lblObs As New System.Windows.Forms.Label()
+    lblObs.Text = "Se preencher o campo novo, ele será salvo na lista para os próximos arquivos."
+    lblObs.Left = 20
+    lblObs.Top = 155
+    lblObs.Width = 400
+    lblObs.Height = 40
+
+    Dim btnOk As New System.Windows.Forms.Button()
+    btnOk.Text = "OK"
+    btnOk.Left = 250
+    btnOk.Top = 240
+    btnOk.Width = 80
+    btnOk.DialogResult = System.Windows.Forms.DialogResult.OK
+
+    Dim btnCancelar As New System.Windows.Forms.Button()
+    btnCancelar.Text = "Cancelar"
+    btnCancelar.Left = 340
+    btnCancelar.Top = 240
+    btnCancelar.Width = 80
+    btnCancelar.DialogResult = System.Windows.Forms.DialogResult.Cancel
+
+    frm.Controls.Add(lblLista)
+    frm.Controls.Add(cmb)
+    frm.Controls.Add(lblNovo)
+    frm.Controls.Add(txtNovo)
+    frm.Controls.Add(lblObs)
+    frm.Controls.Add(btnOk)
+    frm.Controls.Add(btnCancelar)
+
+    frm.AcceptButton = btnOk
+    frm.CancelButton = btnCancelar
+
+    Dim resultado As System.Windows.Forms.DialogResult
+    resultado = frm.ShowDialog()
+
+    Dim valorFinal As String
+    valorFinal = valorPadrao
+
+    If resultado = System.Windows.Forms.DialogResult.OK Then
+        If Trim(txtNovo.Text) <> "" Then
+            valorFinal = Trim(txtNovo.Text)
+
+            If Not listaValores.Contains(valorFinal) Then
+                System.IO.File.AppendAllText(arquivoLista, vbCrLf & valorFinal)
+            End If
+        Else
+            If cmb.SelectedItem IsNot Nothing Then
+                valorFinal = cmb.SelectedItem.ToString()
+            Else
+                valorFinal = valorPadrao
+            End If
+        End If
+    Else
+        valorFinal = valorAtual
+        If Trim(valorFinal) = "" Then
+            valorFinal = valorPadrao
+        End If
+    End If
+
+    iProperties.Value("Custom", nomeIProperty) = valorFinal
+
+    Return valorFinal
+
+End Function
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: TRATAMENTO COM CHECKLIST SEMPRE PERGUNTANDO
+' ==========================================================
+
+Public Function PerguntarTratamentoChecklist() As String
+
+    Dim tratamentoAtual As String
+    tratamentoAtual = ""
+
+    Try
+        tratamentoAtual = iProperties.Value("Custom", "Tratamento")
+    Catch
+        iProperties.Value("Custom", "Tratamento") = ""
+        tratamentoAtual = ""
+    End Try
+
+    Dim pastaListas As String
+    pastaListas = ObterPastaListas()
+
+    Dim arquivoTratamentos As String
+    arquivoTratamentos = pastaListas & "\tratamentos.txt"
+
+    If Not System.IO.File.Exists(arquivoTratamentos) Then
+        Dim tratamentosIniciais As String
+        tratamentosIniciais = "N/A" & vbCrLf & _
+                              "Tempera" & vbCrLf & _
+                              "Revenimento" & vbCrLf & _
+                              "Cementação" & vbCrLf & _
+                              "Nitretação" & vbCrLf & _
+                              "Galvanização"
+
+        System.IO.File.WriteAllText(arquivoTratamentos, tratamentosIniciais)
+    End If
+
+    Dim listaTratamentos As New ArrayList
+    Dim linhasTratamentos() As String
+    linhasTratamentos = System.IO.File.ReadAllLines(arquivoTratamentos)
+
+    If Not listaTratamentos.Contains("N/A") Then
+        listaTratamentos.Add("N/A")
+    End If
+
+    For Each linha As String In linhasTratamentos
+        If Trim(linha) <> "" Then
+            If Not listaTratamentos.Contains(Trim(linha)) Then
+                listaTratamentos.Add(Trim(linha))
+            End If
+        End If
+    Next
+
+    Dim frmTratamento As New System.Windows.Forms.Form()
+    frmTratamento.Text = "Tratamento da peça"
+    frmTratamento.Width = 460
+    frmTratamento.Height = 420
+    frmTratamento.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+    frmTratamento.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+    frmTratamento.MaximizeBox = False
+    frmTratamento.MinimizeBox = False
+
+    Dim lblTratInfo As New System.Windows.Forms.Label()
+    lblTratInfo.Text = "Selecione um ou mais tratamentos. Use N/A se não tiver tratamento:"
+    lblTratInfo.Left = 20
+    lblTratInfo.Top = 20
+    lblTratInfo.Width = 400
+    lblTratInfo.Height = 35
+
+    Dim chkTratamentos As New System.Windows.Forms.CheckedListBox()
+    chkTratamentos.Left = 20
+    chkTratamentos.Top = 60
+    chkTratamentos.Width = 400
+    chkTratamentos.Height = 135
+    chkTratamentos.CheckOnClick = True
+
+    For Each item As String In listaTratamentos
+        chkTratamentos.Items.Add(item)
+    Next
+
+    If Trim(tratamentoAtual) <> "" Then
+        For i As Integer = 0 To chkTratamentos.Items.Count - 1
+            If tratamentoAtual.Contains(chkTratamentos.Items(i).ToString()) Then
+                chkTratamentos.SetItemChecked(i, True)
+            End If
+        Next
+    Else
+        If chkTratamentos.Items.Contains("N/A") Then
+            chkTratamentos.SetItemChecked(chkTratamentos.Items.IndexOf("N/A"), True)
+        End If
+    End If
+
+    Dim lblNovoTrat As New System.Windows.Forms.Label()
+    lblNovoTrat.Text = "Ou digite um novo tratamento:"
+    lblNovoTrat.Left = 20
+    lblNovoTrat.Top = 210
+    lblNovoTrat.Width = 400
+    lblNovoTrat.Height = 20
+
+    Dim txtNovoTrat As New System.Windows.Forms.TextBox()
+    txtNovoTrat.Left = 20
+    txtNovoTrat.Top = 235
+    txtNovoTrat.Width = 400
+
+    Dim lblObsTrat As New System.Windows.Forms.Label()
+    lblObsTrat.Text = "Se preencher o campo novo, ele será salvo na lista e considerado junto com os marcados."
+    lblObsTrat.Left = 20
+    lblObsTrat.Top = 270
+    lblObsTrat.Width = 400
+    lblObsTrat.Height = 40
+
+    Dim btnTratOk As New System.Windows.Forms.Button()
+    btnTratOk.Text = "OK"
+    btnTratOk.Left = 250
+    btnTratOk.Top = 330
+    btnTratOk.Width = 80
+    btnTratOk.DialogResult = System.Windows.Forms.DialogResult.OK
+
+    Dim btnTratCancelar As New System.Windows.Forms.Button()
+    btnTratCancelar.Text = "Cancelar"
+    btnTratCancelar.Left = 340
+    btnTratCancelar.Top = 330
+    btnTratCancelar.Width = 80
+    btnTratCancelar.DialogResult = System.Windows.Forms.DialogResult.Cancel
+
+    frmTratamento.Controls.Add(lblTratInfo)
+    frmTratamento.Controls.Add(chkTratamentos)
+    frmTratamento.Controls.Add(lblNovoTrat)
+    frmTratamento.Controls.Add(txtNovoTrat)
+    frmTratamento.Controls.Add(lblObsTrat)
+    frmTratamento.Controls.Add(btnTratOk)
+    frmTratamento.Controls.Add(btnTratCancelar)
+
+    frmTratamento.AcceptButton = btnTratOk
+    frmTratamento.CancelButton = btnTratCancelar
+
+    Dim resultadoTratamento As System.Windows.Forms.DialogResult
+    resultadoTratamento = frmTratamento.ShowDialog()
+
+    Dim tratamentoFinal As String
+    tratamentoFinal = "N/A"
+
+    If resultadoTratamento = System.Windows.Forms.DialogResult.OK Then
+        Dim tratamentosSelecionados As New ArrayList
+
+        For i As Integer = 0 To chkTratamentos.CheckedItems.Count - 1
+            tratamentosSelecionados.Add(chkTratamentos.CheckedItems(i).ToString())
+        Next
+
+        If Trim(txtNovoTrat.Text) <> "" Then
+            Dim novoTratamento As String
+            novoTratamento = Trim(txtNovoTrat.Text)
+
+            If Not listaTratamentos.Contains(novoTratamento) Then
+                System.IO.File.AppendAllText(arquivoTratamentos, vbCrLf & novoTratamento)
+            End If
+
+            If Not tratamentosSelecionados.Contains(novoTratamento) Then
+                tratamentosSelecionados.Add(novoTratamento)
+            End If
+        End If
+
+        If tratamentosSelecionados.Count > 0 Then
+            tratamentoFinal = ""
+            For i As Integer = 0 To tratamentosSelecionados.Count - 1
+                If tratamentosSelecionados(i).ToString() <> "N/A" Or tratamentosSelecionados.Count = 1 Then
+                    If tratamentoFinal = "" Then
+                        tratamentoFinal = tratamentosSelecionados(i).ToString()
+                    Else
+                        tratamentoFinal = tratamentoFinal & " + " & tratamentosSelecionados(i).ToString()
+                    End If
+                End If
+            Next
+        End If
+    Else
+        tratamentoFinal = tratamentoAtual
+        If Trim(tratamentoFinal) = "" Then
+            tratamentoFinal = "N/A"
+        End If
+    End If
+
+    If Trim(tratamentoFinal) = "" Then
+        tratamentoFinal = "N/A"
+    End If
+
+    iProperties.Value("Custom", "Tratamento") = tratamentoFinal
+
+    Return tratamentoFinal
+
+End Function
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: DUREZA SEMPRE PERGUNTANDO
+' ==========================================================
+
+Public Function PerguntarDureza() As String
+
+    Dim durezaAtual As String
+    durezaAtual = ""
+
+    Try
+        durezaAtual = iProperties.Value("Custom", "Dureza")
+    Catch
+        iProperties.Value("Custom", "Dureza") = ""
+        durezaAtual = ""
+    End Try
+
+    durezaAtual = InputBox("Informe a dureza da peça:" & vbCrLf & _
+                           "Exemplo: 55HRC. Use N/A se não se aplicar.", _
+                           "Dureza da peça", _
+                           durezaAtual)
+
+    If Trim(durezaAtual) = "" Then
+        durezaAtual = "N/A"
+    End If
+
+    iProperties.Value("Custom", "Dureza") = durezaAtual
+
+    Return durezaAtual
+
+End Function
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: PROCESSOS COM CHECKLIST
+' ==========================================================
+
+Public Function PerguntarProcessosChecklist() As String
+
+    Dim processosAtual As String
+    processosAtual = ""
+
+    Try
+        processosAtual = iProperties.Value("Custom", "Processos")
+    Catch
+        iProperties.Value("Custom", "Processos") = ""
+        processosAtual = ""
+    End Try
+
+    Dim listaProcessos As New ArrayList
+    listaProcessos.Add("Corte a laser")
+    listaProcessos.Add("Dobra")
+    listaProcessos.Add("Usinagem")
+    listaProcessos.Add("Corte Serra")
+
+    Dim frmProcessos As New System.Windows.Forms.Form()
+    frmProcessos.Text = "Processos da peça"
+    frmProcessos.Width = 420
+    frmProcessos.Height = 300
+    frmProcessos.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+    frmProcessos.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+    frmProcessos.MaximizeBox = False
+    frmProcessos.MinimizeBox = False
+
+    Dim lblInfo As New System.Windows.Forms.Label()
+    lblInfo.Text = "Selecione um ou mais processos aplicáveis:"
+    lblInfo.Left = 20
+    lblInfo.Top = 20
+    lblInfo.Width = 360
+    lblInfo.Height = 20
+
+    Dim chkProcessos As New System.Windows.Forms.CheckedListBox()
+    chkProcessos.Left = 20
+    chkProcessos.Top = 50
+    chkProcessos.Width = 360
+    chkProcessos.Height = 130
+    chkProcessos.CheckOnClick = True
+
+    For Each item As String In listaProcessos
+        chkProcessos.Items.Add(item)
+    Next
+
+    If Trim(processosAtual) <> "" Then
+        For i As Integer = 0 To chkProcessos.Items.Count - 1
+            If processosAtual.Contains(chkProcessos.Items(i).ToString()) Then
+                chkProcessos.SetItemChecked(i, True)
+            End If
+        Next
+    End If
+
+    Dim btnOk As New System.Windows.Forms.Button()
+    btnOk.Text = "OK"
+    btnOk.Left = 210
+    btnOk.Top = 210
+    btnOk.Width = 80
+    btnOk.DialogResult = System.Windows.Forms.DialogResult.OK
+
+    Dim btnCancelar As New System.Windows.Forms.Button()
+    btnCancelar.Text = "Cancelar"
+    btnCancelar.Left = 300
+    btnCancelar.Top = 210
+    btnCancelar.Width = 80
+    btnCancelar.DialogResult = System.Windows.Forms.DialogResult.Cancel
+
+    frmProcessos.Controls.Add(lblInfo)
+    frmProcessos.Controls.Add(chkProcessos)
+    frmProcessos.Controls.Add(btnOk)
+    frmProcessos.Controls.Add(btnCancelar)
+
+    frmProcessos.AcceptButton = btnOk
+    frmProcessos.CancelButton = btnCancelar
+
+    Dim resultado As System.Windows.Forms.DialogResult
+    resultado = frmProcessos.ShowDialog()
+
+    Dim processosFinal As String
+    processosFinal = "N/A"
+
+    If resultado = System.Windows.Forms.DialogResult.OK Then
+        Dim processosSelecionados As New ArrayList
+
+        For i As Integer = 0 To chkProcessos.CheckedItems.Count - 1
+            processosSelecionados.Add(chkProcessos.CheckedItems(i).ToString())
+        Next
+
+        If processosSelecionados.Count > 0 Then
+            processosFinal = ""
+            For i As Integer = 0 To processosSelecionados.Count - 1
+                If processosFinal = "" Then
+                    processosFinal = processosSelecionados(i).ToString()
+                Else
+                    processosFinal = processosFinal & " + " & processosSelecionados(i).ToString()
+                End If
+            Next
+        End If
+    Else
+        processosFinal = processosAtual
+        If Trim(processosFinal) = "" Then
+            processosFinal = "N/A"
+        End If
+    End If
+
+    iProperties.Value("Custom", "Processos") = processosFinal
+
+    Return processosFinal
+
+End Function
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: LISTA EDITÁVEL
+'
+' Usada para:
+' - MaterialLegenda
+' - AcabamentoLista
+' - Futuramente outros campos
+' ==========================================================
+
+Public Function ObterValorListaEditavel(ByVal nomeIProperty As String, _
+                                  ByVal tituloForm As String, _
+                                  ByVal textoLista As String, _
+                                  ByVal textoNovo As String, _
+                                  ByVal nomeArquivo As String, _
+                                  ByVal valoresIniciais As String, _
+                                  ByVal valorPadrao As String) As String
+
+    Dim valorAtual As String
+    valorAtual = ""
+
+    Try
+        valorAtual = iProperties.Value("Custom", nomeIProperty)
+    Catch
+        iProperties.Value("Custom", nomeIProperty) = ""
+        valorAtual = ""
+    End Try
+
+    If Trim(valorAtual) <> "" Then
+        Return valorAtual
+    End If
+
+    Dim pastaListas As String
+    pastaListas = ObterPastaListas()
+
+    Dim arquivoLista As String
+    arquivoLista = pastaListas & "\" & nomeArquivo
+
+    If Not System.IO.File.Exists(arquivoLista) Then
+        System.IO.File.WriteAllText(arquivoLista, valoresIniciais)
+    End If
+
+    Dim listaValores As New ArrayList
+    Dim linhas() As String
+    linhas = System.IO.File.ReadAllLines(arquivoLista)
+
+    For Each linha As String In linhas
+        If Trim(linha) <> "" Then
+            If Not listaValores.Contains(Trim(linha)) Then
+                listaValores.Add(Trim(linha))
+            End If
+        End If
+    Next
+
+    Dim frm As New System.Windows.Forms.Form()
+    frm.Text = tituloForm
+    frm.Width = 460
+    frm.Height = 360
+    frm.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+    frm.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+    frm.MaximizeBox = False
+    frm.MinimizeBox = False
+
+    Dim lblLista As New System.Windows.Forms.Label()
+    lblLista.Text = textoLista
+    lblLista.Left = 20
+    lblLista.Top = 20
+    lblLista.Width = 400
+    lblLista.Height = 20
+
+    Dim cmb As New System.Windows.Forms.ComboBox()
+    cmb.Left = 20
+    cmb.Top = 45
+    cmb.Width = 400
+    cmb.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList
+
+    For Each item As String In listaValores
+        cmb.Items.Add(item)
+    Next
+
+    If cmb.Items.Count > 0 Then
+        cmb.SelectedIndex = 0
+    End If
+
+    Dim lblNovo As New System.Windows.Forms.Label()
+    lblNovo.Text = textoNovo
+    lblNovo.Left = 20
+    lblNovo.Top = 95
+    lblNovo.Width = 400
+    lblNovo.Height = 20
+
+    Dim txtNovo As New System.Windows.Forms.TextBox()
+    txtNovo.Left = 20
+    txtNovo.Top = 120
+    txtNovo.Width = 400
+
+    Dim lblObs As New System.Windows.Forms.Label()
+    lblObs.Text = "Se preencher o campo novo, ele será salvo na lista para os próximos arquivos."
+    lblObs.Left = 20
+    lblObs.Top = 155
+    lblObs.Width = 400
+    lblObs.Height = 40
+
+    Dim btnOk As New System.Windows.Forms.Button()
+    btnOk.Text = "OK"
+    btnOk.Left = 250
+    btnOk.Top = 240
+    btnOk.Width = 80
+    btnOk.DialogResult = System.Windows.Forms.DialogResult.OK
+
+    Dim btnCancelar As New System.Windows.Forms.Button()
+    btnCancelar.Text = "Cancelar"
+    btnCancelar.Left = 340
+    btnCancelar.Top = 240
+    btnCancelar.Width = 80
+    btnCancelar.DialogResult = System.Windows.Forms.DialogResult.Cancel
+
+    frm.Controls.Add(lblLista)
+    frm.Controls.Add(cmb)
+    frm.Controls.Add(lblNovo)
+    frm.Controls.Add(txtNovo)
+    frm.Controls.Add(lblObs)
+    frm.Controls.Add(btnOk)
+    frm.Controls.Add(btnCancelar)
+
+    frm.AcceptButton = btnOk
+    frm.CancelButton = btnCancelar
+
+    Dim resultado As System.Windows.Forms.DialogResult
+    resultado = frm.ShowDialog()
+
+    Dim valorFinal As String
+    valorFinal = valorPadrao
+
+    If resultado = System.Windows.Forms.DialogResult.OK Then
+
+        If Trim(txtNovo.Text) <> "" Then
+            valorFinal = Trim(txtNovo.Text)
+
+            If Not listaValores.Contains(valorFinal) Then
+                System.IO.File.AppendAllText(arquivoLista, vbCrLf & valorFinal)
+            End If
+
+        Else
+            If cmb.SelectedItem IsNot Nothing Then
+                valorFinal = cmb.SelectedItem.ToString()
+            Else
+                valorFinal = valorPadrao
+            End If
+        End If
+
+    Else
+        valorFinal = valorPadrao
+    End If
+
+    iProperties.Value("Custom", nomeIProperty) = valorFinal
+
+    Return valorFinal
+
+End Function
+
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: TRATAMENTO COM CHECKLIST EDITÁVEL
+' ==========================================================
+
+Public Function ObterTratamentoChecklist() As String
+
+    Dim tratamentoAtual As String
+    tratamentoAtual = ""
+
+    Try
+        tratamentoAtual = iProperties.Value("Custom", "Tratamento")
+    Catch
+        iProperties.Value("Custom", "Tratamento") = ""
+        tratamentoAtual = ""
+    End Try
+
+    If Trim(tratamentoAtual) <> "" Then
+        Return tratamentoAtual
+    End If
+
+    Dim pastaListas As String
+    pastaListas = ObterPastaListas()
+
+    Dim arquivoTratamentos As String
+    arquivoTratamentos = pastaListas & "\tratamentos.txt"
+
+    If Not System.IO.File.Exists(arquivoTratamentos) Then
+        Dim tratamentosIniciais As String
+        tratamentosIniciais = "Tempera" & vbCrLf & _
+                              "Revenimento" & vbCrLf & _
+                              "Cementação" & vbCrLf & _
+                              "Nitretação" & vbCrLf & _
+                              "Galvanização"
+
+        System.IO.File.WriteAllText(arquivoTratamentos, tratamentosIniciais)
+    End If
+
+    Dim listaTratamentos As New ArrayList
+    Dim linhasTratamentos() As String
+    linhasTratamentos = System.IO.File.ReadAllLines(arquivoTratamentos)
+
+    For Each linha As String In linhasTratamentos
+        If Trim(linha) <> "" Then
+            If Not listaTratamentos.Contains(Trim(linha)) Then
+                listaTratamentos.Add(Trim(linha))
+            End If
+        End If
+    Next
+
+    Dim frmTratamento As New System.Windows.Forms.Form()
+    frmTratamento.Text = "Tratamento da peça"
+    frmTratamento.Width = 460
+    frmTratamento.Height = 420
+    frmTratamento.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+    frmTratamento.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+    frmTratamento.MaximizeBox = False
+    frmTratamento.MinimizeBox = False
+
+    Dim lblTratInfo As New System.Windows.Forms.Label()
+    lblTratInfo.Text = "Selecione um ou mais tratamentos:"
+    lblTratInfo.Left = 20
+    lblTratInfo.Top = 20
+    lblTratInfo.Width = 400
+    lblTratInfo.Height = 20
+
+    Dim chkTratamentos As New System.Windows.Forms.CheckedListBox()
+    chkTratamentos.Left = 20
+    chkTratamentos.Top = 45
+    chkTratamentos.Width = 400
+    chkTratamentos.Height = 150
+    chkTratamentos.CheckOnClick = True
+
+    For Each item As String In listaTratamentos
+        chkTratamentos.Items.Add(item)
+    Next
+
+    Dim lblNovoTrat As New System.Windows.Forms.Label()
+    lblNovoTrat.Text = "Ou digite um novo tratamento:"
+    lblNovoTrat.Left = 20
+    lblNovoTrat.Top = 210
+    lblNovoTrat.Width = 400
+    lblNovoTrat.Height = 20
+
+    Dim txtNovoTrat As New System.Windows.Forms.TextBox()
+    txtNovoTrat.Left = 20
+    txtNovoTrat.Top = 235
+    txtNovoTrat.Width = 400
+
+    Dim lblObsTrat As New System.Windows.Forms.Label()
+    lblObsTrat.Text = "Se preencher o campo novo, ele será salvo na lista e considerado junto com os marcados."
+    lblObsTrat.Left = 20
+    lblObsTrat.Top = 270
+    lblObsTrat.Width = 400
+    lblObsTrat.Height = 40
+
+    Dim btnTratOk As New System.Windows.Forms.Button()
+    btnTratOk.Text = "OK"
+    btnTratOk.Left = 250
+    btnTratOk.Top = 330
+    btnTratOk.Width = 80
+    btnTratOk.DialogResult = System.Windows.Forms.DialogResult.OK
+
+    Dim btnTratCancelar As New System.Windows.Forms.Button()
+    btnTratCancelar.Text = "Cancelar"
+    btnTratCancelar.Left = 340
+    btnTratCancelar.Top = 330
+    btnTratCancelar.Width = 80
+    btnTratCancelar.DialogResult = System.Windows.Forms.DialogResult.Cancel
+
+    frmTratamento.Controls.Add(lblTratInfo)
+    frmTratamento.Controls.Add(chkTratamentos)
+    frmTratamento.Controls.Add(lblNovoTrat)
+    frmTratamento.Controls.Add(txtNovoTrat)
+    frmTratamento.Controls.Add(lblObsTrat)
+    frmTratamento.Controls.Add(btnTratOk)
+    frmTratamento.Controls.Add(btnTratCancelar)
+
+    frmTratamento.AcceptButton = btnTratOk
+    frmTratamento.CancelButton = btnTratCancelar
+
+    Dim resultadoTratamento As System.Windows.Forms.DialogResult
+    resultadoTratamento = frmTratamento.ShowDialog()
+
+    Dim tratamentoFinal As String
+    tratamentoFinal = "N/A"
+
+    If resultadoTratamento = System.Windows.Forms.DialogResult.OK Then
+
+        Dim tratamentosSelecionados As New ArrayList
+
+        For i As Integer = 0 To chkTratamentos.CheckedItems.Count - 1
+            tratamentosSelecionados.Add(chkTratamentos.CheckedItems(i).ToString())
+        Next
+
+        If Trim(txtNovoTrat.Text) <> "" Then
+            Dim novoTratamento As String
+            novoTratamento = Trim(txtNovoTrat.Text)
+
+            If Not listaTratamentos.Contains(novoTratamento) Then
+                System.IO.File.AppendAllText(arquivoTratamentos, vbCrLf & novoTratamento)
+            End If
+
+            If Not tratamentosSelecionados.Contains(novoTratamento) Then
+                tratamentosSelecionados.Add(novoTratamento)
+            End If
+        End If
+
+        If tratamentosSelecionados.Count > 0 Then
+            For i As Integer = 0 To tratamentosSelecionados.Count - 1
+                If i = 0 Then
+                    tratamentoFinal = tratamentosSelecionados(i).ToString()
+                Else
+                    tratamentoFinal = tratamentoFinal & " + " & tratamentosSelecionados(i).ToString()
+                End If
+            Next
+        End If
+
+    End If
+
+    iProperties.Value("Custom", "Tratamento") = tratamentoFinal
+
+    Return tratamentoFinal
+
+End Function
+
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: DUREZA
+' ==========================================================
+
+Public Function ObterDureza() As String
+
+    Dim durezaAtual As String
+    durezaAtual = ""
+
+    Try
+        durezaAtual = iProperties.Value("Custom", "Dureza")
+    Catch
+        iProperties.Value("Custom", "Dureza") = ""
+        durezaAtual = ""
+    End Try
+
+    If Trim(durezaAtual) <> "" Then
+        Return durezaAtual
+    End If
+
+    durezaAtual = InputBox("Informe a dureza da peça:" & vbCrLf & _
+                           "Exemplo: 55HRC", _
+                           "Dureza da peça", _
+                           "")
+
+    If Trim(durezaAtual) = "" Then
+        durezaAtual = "N/A"
+    End If
+
+    iProperties.Value("Custom", "Dureza") = durezaAtual
+
+    Return durezaAtual
+
+End Function
+
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: LER IPROPERTY CUSTOM COM PADRÃO
+' ==========================================================
+
+Public Function LerIPropertyCustom(ByVal nomeCampo As String, _
+                                   ByVal valorPadrao As String) As String
+
+    Try
+        Dim valor As String
+        valor = iProperties.Value("Custom", nomeCampo)
+
+        If Trim(valor) = "" Then
+            Return valorPadrao
+        End If
+
+        Return valor
+    Catch
+        Return valorPadrao
+    End Try
+
+End Function

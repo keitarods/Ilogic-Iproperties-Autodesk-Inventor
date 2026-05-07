@@ -1,0 +1,21 @@
+﻿' ==========================================================
+' Regra iLogic: Limpar_Dureza
+'
+' Objetivo:
+' - Limpar o campo Dureza das iProperties customizadas
+' - Permitir preencher novamente a dureza
+'   na próxima execução da regra principal
+' ==========================================================
+
+Try
+    iProperties.Value("Custom", "Dureza") = ""
+Catch
+    MessageBox.Show("A propriedade customizada 'Dureza' não foi encontrada.", "Aviso iLogic")
+    Return
+End Try
+
+InventorVb.DocumentUpdate()
+
+MessageBox.Show("Campo Dureza limpo com sucesso." & vbCrLf & _
+                "Na próxima execução da regra principal, a dureza será solicitada novamente.", _
+                "Dureza limpa")

@@ -1,0 +1,23 @@
+﻿Sub Main()
+
+    Try
+        Dim processosAtual As String
+        processosAtual = iProperties.Value("Custom", "Processos")
+    Catch
+        iProperties.Value("Custom", "Processos") = ""
+    End Try
+
+    Try
+        iProperties.Value("Custom", "Processos") = ""
+
+        MessageBox.Show("Campo Processos limpo com sucesso.", "iLogic")
+
+    Catch ex As Exception
+
+        MessageBox.Show("Não foi possível limpar o campo Processos." & vbCrLf & _
+                        "Detalhe: " & ex.Message, _
+                        "Erro iLogic")
+
+    End Try
+
+End Sub

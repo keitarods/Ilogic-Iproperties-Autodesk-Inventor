@@ -1,0 +1,21 @@
+﻿' ==========================================================
+' Regra iLogic: Limpar_AcabamentoLista
+'
+' Objetivo:
+' - Limpar o campo AcabamentoLista das iProperties customizadas
+' - Permitir selecionar/preencher novamente o acabamento
+'   na próxima execução da regra principal
+' ==========================================================
+
+Try
+    iProperties.Value("Custom", "AcabamentoLista") = ""
+Catch
+    MessageBox.Show("A propriedade customizada 'AcabamentoLista' não foi encontrada.", "Aviso iLogic")
+    Return
+End Try
+
+InventorVb.DocumentUpdate()
+
+MessageBox.Show("Campo AcabamentoLista limpo com sucesso." & vbCrLf & _
+                "Na próxima execução da regra principal, o acabamento será solicitado novamente.", _
+                "Acabamento limpo")

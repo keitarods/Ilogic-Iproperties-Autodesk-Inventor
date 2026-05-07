@@ -1,0 +1,21 @@
+﻿' ==========================================================
+' Regra iLogic: Limpar_Tratamento
+'
+' Objetivo:
+' - Limpar o campo Tratamento das iProperties customizadas
+' - Permitir selecionar novamente os tratamentos térmicos
+'   na próxima execução da regra principal
+' ==========================================================
+
+Try
+    iProperties.Value("Custom", "Tratamento") = ""
+Catch
+    MessageBox.Show("A propriedade customizada 'Tratamento' não foi encontrada.", "Aviso iLogic")
+    Return
+End Try
+
+InventorVb.DocumentUpdate()
+
+MessageBox.Show("Campo Tratamento limpo com sucesso." & vbCrLf & _
+                "Na próxima execução da regra principal, a janela de seleção de tratamento será exibida novamente.", _
+                "Tratamento limpo")

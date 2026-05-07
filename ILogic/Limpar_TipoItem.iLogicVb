@@ -1,0 +1,20 @@
+﻿ ' ==========================================================
+' Regra iLogic: Limpar_TipoItem
+'
+' Objetivo:
+' - Limpar o campo TipoItem das iProperties customizadas
+' - Permitir selecionar novamente o tipo de item
+'   na próxima execução da regra principal
+' ==========================================================
+
+Try
+    iProperties.Value("Custom", "TipoItem") = ""
+Catch
+    iProperties.Value("Custom", "TipoItem") = ""
+End Try
+
+InventorVb.DocumentUpdate()
+
+MessageBox.Show("Campo TipoItem limpo com sucesso." & vbCrLf & _
+                "Na próxima execução da regra principal, o tipo de item será solicitado novamente.", _
+                "TipoItem limpo")
