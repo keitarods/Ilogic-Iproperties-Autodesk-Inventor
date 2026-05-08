@@ -38,7 +38,12 @@ Dim gAcabamentoLista As String
 Dim gTratamento As String
 Dim gDureza As String
 Dim gProcessos As String
+Dim gSetor As String
 Dim gCodigo As String
+Dim gTipoFixador As String
+Dim gGrauResistencia As String
+Dim gPassoFixador As String
+Dim gComprimentoFixador As String
 
 ' 2 - TipoItem
 gTipoItem = PerguntarTipoItem()
@@ -86,6 +91,13 @@ If Trim(gProcessos) = "" Then
 End If
 
 ' 8 - Código
+gSetor = PerguntarSetorChecklist()
+
+If Trim(gSetor) = "" Then
+    gSetor = "N/A"
+End If
+
+' 8 - Código
 gCodigo = PerguntarCodigo()
 
 If Trim(gCodigo) = "" Then
@@ -94,7 +106,7 @@ If Trim(gCodigo) = "" Then
 End If
 
 ' Salva as variáveis comuns antes da análise geométrica.
-SalvarVariaveisComuns(gTipoItem, gMaterialLegenda, gAcabamentoLista, gTratamento, gDureza, gProcessos, gCodigo)
+SalvarVariaveisComuns(gTipoItem, gMaterialLegenda, gAcabamentoLista, gTratamento, gDureza, gProcessos, gSetor, gCodigo)
 
 ' 9 - Aplica regra conforme TipoItem.
 If gTipoItem = "Chapa" Then
@@ -118,6 +130,33 @@ ElseIf gTipoItem = "Eixo" Then
     ' Não converte para Sheet Metal e não tenta planificar.
     ' Trata a geometria como peça normal.
     Atualizar_Eixo(oDoc)
+
+ElseIf gTipoItem = "Fixadores" Then
+
+    gTipoFixador = PerguntarTipoFixador()
+    If Trim(gTipoFixador) = "" Then
+        MessageBox.Show("Nenhum tipo de fixador foi selecionado. A regra será encerrada.", "iLogic")
+        Return
+    End If
+
+    gTipoFixador = PerguntarDetalheTipoFixador(gTipoFixador)
+
+    gGrauResistencia = PerguntarGrauResistenciaFixador()
+    If Trim(gGrauResistencia) = "" Then
+        gGrauResistencia = "N/A"
+    End If
+
+    gComprimentoFixador = ""
+    If InStr(1, gTipoFixador, "Parafuso", vbTextCompare) > 0 Then
+        gComprimentoFixador = PerguntarComprimentoFixador()
+    End If
+
+    gPassoFixador = PerguntarPassoFixador()
+    If Trim(gPassoFixador) = "" Then
+        gPassoFixador = "N/A"
+    End If
+
+    Atualizar_Fixadores(gTipoFixador, gGrauResistencia, gComprimentoFixador, gPassoFixador)
 
 Else
 
@@ -232,6 +271,7 @@ Public Sub SalvarVariaveisComuns(ByVal tipoItem As String, _
                                   ByVal tratamento As String, _
                                   ByVal dureza As String, _
                                   ByVal processos As String, _
+                                  ByVal setor As String, _
                                   ByVal codigo As String)
 
     iProperties.Value("Custom", "TipoItem") = tipoItem
@@ -240,6 +280,7 @@ Public Sub SalvarVariaveisComuns(ByVal tipoItem As String, _
     iProperties.Value("Custom", "Tratamento") = tratamento
     iProperties.Value("Custom", "Dureza") = dureza
     iProperties.Value("Custom", "Processos") = processos
+    iProperties.Value("Custom", "Setor") = setor
     iProperties.Value("Custom", "Código") = codigo
 
 End Sub
@@ -297,6 +338,18 @@ Public Function PerguntarMaterialPorTipo(ByVal tipoItem As String) As String
                                              "Tarugo de Inox AISI 304" & vbCrLf & _
                                              "Tarugo de Inox AISI 316", _
                                              "Tarugo de Aço SAE 1045")
+    ElseIf tipoItem = "Fixadores" Then
+        Return ObterValorListaEditavelSempre("MaterialLegenda", _
+                                             "Material do fixador", _
+                                             "Selecione um material existente:", _
+                                             "Ou digite um novo material:", _
+                                             "materiais_fixadores.txt", _
+                                             "Aço Carbono" & vbCrLf & _
+                                             "Aço Liga" & vbCrLf & _
+                                             "Aço Inox AISI 304" & vbCrLf & _
+                                             "Aço Inox AISI 316" & vbCrLf & _
+                                             "Latão", _
+                                             "Aço Carbono")
     End If
 
     Return ""
@@ -348,6 +401,7 @@ Public Function PerguntarTipoItem() As String
     listaTipos.Add("Tubo Quadrado/Retangular")
     listaTipos.Add("Tubo Redondo")
     listaTipos.Add("Eixo")
+    listaTipos.Add("Fixadores")
 
     Dim valorPadrao As String
     valorPadrao = "Chapa"
@@ -370,6 +424,131 @@ Public Function PerguntarTipoItem() As String
     End If
 
     Return tipo
+
+End Function
+
+Public Function PerguntarTipoFixador() As String
+
+    Return ObterValorListaEditavelSempre("Tipo_fixador", _
+                                         "Tipo de fixador", _
+                                         "Selecione um tipo de fixador:", _
+                                         "Ou digite um novo tipo:", _
+                                         "tipos_fixador.txt", _
+                                         "Parafusos" & vbCrLf & _
+                                         "Porcas" & vbCrLf & _
+                                         "Arruelas" & vbCrLf & _
+                                         "Anel elástico" & vbCrLf & _
+                                         "Cupilha", _
+                                         "Parafusos")
+
+End Function
+
+Public Function PerguntarDetalheTipoFixador(ByVal tipoFixadorBase As String) As String
+
+    Dim tipoNormalizado As String
+    tipoNormalizado = Trim(tipoFixadorBase)
+
+    If InStr(1, tipoNormalizado, "Parafuso", vbTextCompare) > 0 Then
+        Return "Parafuso - " & ObterValorListaEditavelSempre("Detalhe_fixador", _
+                                                             "Cabeça do parafuso", _
+                                                             "Selecione o tipo de cabeça:", _
+                                                             "Ou digite um novo tipo:", _
+                                                             "cabecas_parafuso.txt", _
+                                                             "Sextavado" & vbCrLf & _
+                                                             "Allen" & vbCrLf & _
+                                                             "Phillips" & vbCrLf & _
+                                                             "Torks", _
+                                                             "Sextavado")
+    End If
+
+    If InStr(1, tipoNormalizado, "Porca", vbTextCompare) > 0 Then
+        Return "Porca - " & ObterValorListaEditavelSempre("Detalhe_fixador", _
+                                                          "Tipo de porca", _
+                                                          "Selecione o tipo de porca:", _
+                                                          "Ou digite um novo tipo:", _
+                                                          "tipos_porca.txt", _
+                                                          "Comum" & vbCrLf & _
+                                                          "Parlock" & vbCrLf & _
+                                                          "Torque", _
+                                                          "Comum")
+    End If
+
+    If InStr(1, tipoNormalizado, "Arruela", vbTextCompare) > 0 Then
+        Return "Arruela - " & ObterValorListaEditavelSempre("Detalhe_fixador", _
+                                                            "Tipo de arruela", _
+                                                            "Selecione o tipo de arruela:", _
+                                                            "Ou digite um novo tipo:", _
+                                                            "tipos_arruela.txt", _
+                                                            "Lisa aba comum" & vbCrLf & _
+                                                            "Lisa aba larga" & vbCrLf & _
+                                                            "Pressão", _
+                                                            "Lisa aba comum")
+    End If
+
+    Return tipoFixadorBase
+
+End Function
+
+Public Function PerguntarGrauResistenciaFixador() As String
+
+    Return ObterValorListaEditavelSempre("GrauResistencia", _
+                                         "Grau de resistência", _
+                                         "Selecione o grau de resistência:", _
+                                         "Ou digite um novo valor:", _
+                                         "grau_resistencia_fixador.txt", _
+                                         "5.8" & vbCrLf & _
+                                         "6.8" & vbCrLf & _
+                                         "8.8" & vbCrLf & _
+                                         "9.8" & vbCrLf & _
+                                         "10.9" & vbCrLf & _
+                                         "12.9", _
+                                         "8.8")
+
+End Function
+
+Public Function PerguntarComprimentoFixador() As String
+
+    Dim comprimentoAtual As String
+    comprimentoAtual = LerIPropertyCustom("Comprimento", "")
+
+    Dim comprimentoInformado As String
+    comprimentoInformado = InputBox("Informe o comprimento do parafuso em mm:" & vbCrLf & _
+                                    "Exemplo: 40 mm", _
+                                    "Comprimento do parafuso", _
+                                    comprimentoAtual)
+
+    comprimentoInformado = Trim(comprimentoInformado)
+
+    If comprimentoInformado <> "" Then
+        iProperties.Value("Custom", "Comprimento") = comprimentoInformado
+    End If
+
+    Return comprimentoInformado
+
+End Function
+
+Public Function PerguntarPassoFixador() As String
+
+    Return ObterValorListaEditavelSempre("Passo", _
+                                         "Passo do parafuso", _
+                                         "Selecione um passo existente:", _
+                                         "Ou digite um novo passo:", _
+                                         "passos_fixador.txt", _
+                                         "0,50 mm" & vbCrLf & _
+                                         "0,70 mm" & vbCrLf & _
+                                         "0,75 mm" & vbCrLf & _
+                                         "0,80 mm" & vbCrLf & _
+                                         "1,00 mm" & vbCrLf & _
+                                         "1,25 mm" & vbCrLf & _
+                                         "1,50 mm" & vbCrLf & _
+                                         "1,75 mm" & vbCrLf & _
+                                         "2,00 mm" & vbCrLf & _
+                                         "2,50 mm" & vbCrLf & _
+                                         "3,00 mm" & vbCrLf & _
+                                         "UNC" & vbCrLf & _
+                                         "UNF" & vbCrLf & _
+                                         "UNS", _
+                                         "1,00 mm")
 
 End Function
 
@@ -517,6 +696,7 @@ Public Sub Atualizar_Chapa(ByVal oDoc As PartDocument)
     iProperties.Value("Custom", "Tratamento") = tratamentoTxt
     iProperties.Value("Custom", "Dureza") = durezaTxt
     iProperties.Value("Custom", "Processos") = LerIPropertyCustom("Processos", "N/A")
+    iProperties.Value("Custom", "Setor") = LerIPropertyCustom("Setor", "N/A")
     iProperties.Value("Custom", "Código") = LerIPropertyCustom("Código", "")
 
     iProperties.Value("Project", "Description") = descricaoTxt
@@ -723,6 +903,7 @@ Public Sub Atualizar_Tubo_Redondo(ByVal oDoc As PartDocument)
     iProperties.Value("Custom", "Tratamento") = tratamentoTxt
     iProperties.Value("Custom", "Dureza") = durezaTxt
     iProperties.Value("Custom", "Processos") = processosTxt
+    iProperties.Value("Custom", "Setor") = LerIPropertyCustom("Setor", "N/A")
     iProperties.Value("Project", "Description") = descricaoTxt
 
     InventorVb.DocumentUpdate()
@@ -962,6 +1143,7 @@ Public Sub Atualizar_Tubo_Quadrado(ByVal oDoc As PartDocument)
     iProperties.Value("Custom", "Tratamento") = tratamentoTxt
     iProperties.Value("Custom", "Dureza") = durezaTxt
     iProperties.Value("Custom", "Processos") = LerIPropertyCustom("Processos", "N/A")
+    iProperties.Value("Custom", "Setor") = LerIPropertyCustom("Setor", "N/A")
     iProperties.Value("Custom", "Código") = LerIPropertyCustom("Código", "")
 
     iProperties.Value("Project", "Description") = descricaoTxt
@@ -1161,6 +1343,7 @@ Public Sub Atualizar_Eixo(ByVal oDoc As PartDocument)
     iProperties.Value("Custom", "Tratamento") = tratamentoTxt
     iProperties.Value("Custom", "Dureza") = durezaTxt
     iProperties.Value("Custom", "Processos") = LerIPropertyCustom("Processos", "N/A")
+    iProperties.Value("Custom", "Setor") = LerIPropertyCustom("Setor", "N/A")
     iProperties.Value("Custom", "Código") = LerIPropertyCustom("Código", "")
 
     iProperties.Value("Project", "Description") = descricaoTxt
@@ -1179,6 +1362,54 @@ Public Sub Atualizar_Eixo(ByVal oDoc As PartDocument)
                     "Dureza: " & durezaTxt & vbCrLf & _
                     "Processos: " & LerIPropertyCustom("Processos", "N/A") & vbCrLf & _
                     "Código: " & LerIPropertyCustom("Código", ""), _
+                    "Atualização concluída")
+
+End Sub
+
+Public Sub Atualizar_Fixadores(ByVal tipoFixador As String, _
+                               ByVal grauResistencia As String, _
+                               ByVal comprimentoFixador As String, _
+                               ByVal passoFixador As String)
+
+    iProperties.Value("Custom", "TipoItem") = "Fixadores"
+    iProperties.Value("Custom", "Tipo_fixador") = tipoFixador
+    iProperties.Value("Custom", "GrauResistencia") = grauResistencia
+    iProperties.Value("Custom", "Passo") = passoFixador
+
+    If Trim(comprimentoFixador) <> "" Then
+        iProperties.Value("Custom", "Comprimento") = comprimentoFixador
+        iProperties.Value("Custom", "ComprimentoLegenda") = comprimentoFixador
+    End If
+
+    Dim materialPadrao As String
+    materialPadrao = LerIPropertyCustom("MaterialLegenda", "")
+
+    Dim descricaoTxt As String
+    descricaoTxt = UCase(materialPadrao) & " - " & tipoFixador
+
+    If Trim(comprimentoFixador) <> "" Then
+        descricaoTxt = descricaoTxt & " x " & comprimentoFixador
+    End If
+
+    If Trim(passoFixador) <> "" And passoFixador <> "N/A" Then
+        descricaoTxt = descricaoTxt & " - Passo " & passoFixador
+    End If
+
+    If Trim(grauResistencia) <> "" And grauResistencia <> "N/A" Then
+        descricaoTxt = descricaoTxt & " - Classe " & grauResistencia
+    End If
+
+    iProperties.Value("Custom", "DescricaoAutomatica") = descricaoTxt
+    iProperties.Value("Project", "Description") = descricaoTxt
+
+    InventorVb.DocumentUpdate()
+
+    MessageBox.Show("iProperties atualizadas com sucesso!" & vbCrLf & _
+                    "TipoItem: Fixadores" & vbCrLf & _
+                    "Tipo fixador: " & tipoFixador & vbCrLf & _
+                    "Grau de resistência: " & grauResistencia & vbCrLf & _
+                    "Comprimento: " & comprimentoFixador & vbCrLf & _
+                    "Passo: " & passoFixador, _
                     "Atualização concluída")
 
 End Sub
@@ -2151,6 +2382,178 @@ Public Function PerguntarTratamentoChecklist() As String
     iProperties.Value("Custom", "Tratamento") = tratamentoFinal
 
     Return tratamentoFinal
+
+End Function
+
+' ==========================================================
+' FUNÇÃO AUXILIAR: SETOR COM CHECKLIST SEMPRE PERGUNTANDO
+' ==========================================================
+
+Public Function PerguntarSetorChecklist() As String
+
+    Dim setorAtual As String
+    setorAtual = ""
+
+    Try
+        setorAtual = iProperties.Value("Custom", "Setor")
+    Catch
+        iProperties.Value("Custom", "Setor") = ""
+        setorAtual = ""
+    End Try
+
+    Dim pastaListas As String
+    pastaListas = ObterPastaListas()
+
+    Dim arquivoSetores As String
+    arquivoSetores = pastaListas & "\setores.txt"
+
+    If Not System.IO.File.Exists(arquivoSetores) Then
+        Dim setoresIniciais As String
+        setoresIniciais = "Mecânica" & vbCrLf & _
+                          "Elétrica/Eletrônica" & vbCrLf & _
+                          "Hidraúlica" & vbCrLf & _
+                          "IA"
+
+        System.IO.File.WriteAllText(arquivoSetores, setoresIniciais)
+    End If
+
+    Dim listaSetores As New ArrayList
+    Dim linhasSetores() As String
+    linhasSetores = System.IO.File.ReadAllLines(arquivoSetores)
+
+    For Each linha As String In linhasSetores
+        If Trim(linha) <> "" Then
+            If Not listaSetores.Contains(Trim(linha)) Then
+                listaSetores.Add(Trim(linha))
+            End If
+        End If
+    Next
+
+    Dim frmSetor As New System.Windows.Forms.Form()
+    frmSetor.Text = "Setor da peça"
+    frmSetor.Width = 460
+    frmSetor.Height = 420
+    frmSetor.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+    frmSetor.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog
+    frmSetor.MaximizeBox = False
+    frmSetor.MinimizeBox = False
+
+    Dim lblSetorInfo As New System.Windows.Forms.Label()
+    lblSetorInfo.Text = "Selecione um ou mais setores:"
+    lblSetorInfo.Left = 20
+    lblSetorInfo.Top = 20
+    lblSetorInfo.Width = 400
+    lblSetorInfo.Height = 20
+
+    Dim chkSetores As New System.Windows.Forms.CheckedListBox()
+    chkSetores.Left = 20
+    chkSetores.Top = 45
+    chkSetores.Width = 400
+    chkSetores.Height = 150
+    chkSetores.CheckOnClick = True
+
+    For Each item As String In listaSetores
+        chkSetores.Items.Add(item)
+    Next
+
+    If Trim(setorAtual) <> "" Then
+        For i As Integer = 0 To chkSetores.Items.Count - 1
+            If setorAtual.Contains(chkSetores.Items(i).ToString()) Then
+                chkSetores.SetItemChecked(i, True)
+            End If
+        Next
+    End If
+
+    Dim lblNovoSetor As New System.Windows.Forms.Label()
+    lblNovoSetor.Text = "Ou digite um novo setor:"
+    lblNovoSetor.Left = 20
+    lblNovoSetor.Top = 210
+    lblNovoSetor.Width = 400
+    lblNovoSetor.Height = 20
+
+    Dim txtNovoSetor As New System.Windows.Forms.TextBox()
+    txtNovoSetor.Left = 20
+    txtNovoSetor.Top = 235
+    txtNovoSetor.Width = 400
+
+    Dim lblObsSetor As New System.Windows.Forms.Label()
+    lblObsSetor.Text = "Se preencher o campo novo, ele será salvo na lista e considerado junto com os marcados."
+    lblObsSetor.Left = 20
+    lblObsSetor.Top = 270
+    lblObsSetor.Width = 400
+    lblObsSetor.Height = 40
+
+    Dim btnSetorOk As New System.Windows.Forms.Button()
+    btnSetorOk.Text = "OK"
+    btnSetorOk.Left = 250
+    btnSetorOk.Top = 330
+    btnSetorOk.Width = 80
+    btnSetorOk.DialogResult = System.Windows.Forms.DialogResult.OK
+
+    Dim btnSetorCancelar As New System.Windows.Forms.Button()
+    btnSetorCancelar.Text = "Cancelar"
+    btnSetorCancelar.Left = 340
+    btnSetorCancelar.Top = 330
+    btnSetorCancelar.Width = 80
+    btnSetorCancelar.DialogResult = System.Windows.Forms.DialogResult.Cancel
+
+    frmSetor.Controls.Add(lblSetorInfo)
+    frmSetor.Controls.Add(chkSetores)
+    frmSetor.Controls.Add(lblNovoSetor)
+    frmSetor.Controls.Add(txtNovoSetor)
+    frmSetor.Controls.Add(lblObsSetor)
+    frmSetor.Controls.Add(btnSetorOk)
+    frmSetor.Controls.Add(btnSetorCancelar)
+
+    frmSetor.AcceptButton = btnSetorOk
+    frmSetor.CancelButton = btnSetorCancelar
+
+    Dim resultadoSetor As System.Windows.Forms.DialogResult
+    resultadoSetor = frmSetor.ShowDialog()
+
+    Dim setorFinal As String
+    setorFinal = "N/A"
+
+    If resultadoSetor = System.Windows.Forms.DialogResult.OK Then
+        Dim setoresSelecionados As New ArrayList
+
+        For i As Integer = 0 To chkSetores.CheckedItems.Count - 1
+            setoresSelecionados.Add(chkSetores.CheckedItems(i).ToString())
+        Next
+
+        If Trim(txtNovoSetor.Text) <> "" Then
+            Dim novoSetor As String
+            novoSetor = Trim(txtNovoSetor.Text)
+
+            If Not listaSetores.Contains(novoSetor) Then
+                System.IO.File.AppendAllText(arquivoSetores, vbCrLf & novoSetor)
+            End If
+
+            If Not setoresSelecionados.Contains(novoSetor) Then
+                setoresSelecionados.Add(novoSetor)
+            End If
+        End If
+
+        If setoresSelecionados.Count > 0 Then
+            setorFinal = ""
+            For i As Integer = 0 To setoresSelecionados.Count - 1
+                If setorFinal = "" Then
+                    setorFinal = setoresSelecionados(i).ToString()
+                Else
+                    setorFinal = setorFinal & " + " & setoresSelecionados(i).ToString()
+                End If
+            Next
+        End If
+    Else
+        setorFinal = setorAtual
+        If Trim(setorFinal) = "" Then
+            setorFinal = "N/A"
+        End If
+    End If
+
+    iProperties.Value("Custom", "Setor") = setorFinal
+
+    Return setorFinal
 
 End Function
 
